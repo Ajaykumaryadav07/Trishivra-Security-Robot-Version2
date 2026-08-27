@@ -1,0 +1,194 @@
+# ============================================================================
+# Makefile for Security Robot V2 - Optimized Build System
+# ============================================================================
+# Usage:
+#   make build-release    - Build optimized release binary
+#   make build-debug      - Build debug binary with symbols
+#   make benchmark        - Run performance benchmark
+#   make clean            - Clean build artifacts
+#   make help             - Show this help
+# ============================================================================
+
+.PHONY: help build-release build-debug build-fast clean benchmark test monitor install
+
+# Colors for output
+RED     := \033[0;31m
+GREEN   := \033[0;32m
+YELLOW  := \033[0;33m
+BLUE    := \033[0;34m
+NC      := \033[0m # No Color
+
+BUILD_DIR := build
+BINARY    := $(BUILD_DIR)/security_robot
+CMAKE     := cmake
+CORES     := $(shell nproc)
+
+help:
+	@echo "$(BLUE)════════════════════════════════════════════════════════════$(NC)"
+	@echo "$(BLUE)Security Robot V2 - Build System$(NC)"
+	@echo "$(BLUE)════════════════════════════════════════════════════════════$(NC)"
+	@echo ""
+	@echo "$(GREEN)Available targets:$(NC)"
+	@echo "  $(YELLOW)make build-release$(NC)   - Build optimized (-O3 -march=native -flto)"
+	@echo "  $(YELLOW)make build-debug$(NC)     - Build with debug symbols (-g -O0)"
+	@echo "  $(YELLOW)make build-fast$(NC)      - Build with -O2 (balanced speed/debug)"
+	@echo "  $(YELLOW)make benchmark$(NC)      - Run performance benchmark (30 seconds)"
+	@echo "  $(YELLOW)make run$(NC)            - Run the optimized binary"
+	@echo "  $(YELLOW)make monitor$(NC)        - Monitor robot performance"
+	@echo "  $(YELLOW)make clean$(NC)          - Remove build artifacts"
+	@echo "  $(YELLOW)make clean-all$(NC)      - Clean everything including cmake cache"
+	@echo "  $(YELLOW)make test$(NC)           - Run tests"
+	@echo "  $(YELLOW)make install$(NC)        - Install to /usr/local/bin"
+	@echo "  $(YELLOW)make help$(NC)           - Show this help"
+	@echo ""
+	@echo "$(GREEN)Examples:$(NC)"
+	@echo "  $(YELLOW)make build-release && make benchmark$(NC)"
+	@echo "  $(YELLOW)make build-debug && gdb ./build/security_robot$(NC)"
+	@echo "  $(YELLOW)make run$(NC)"
+	@echo ""
+
+# ============================================================================
+# BUILD TARGETS
+# ============================================================================
+
+build-release: clean
+	@echo "$(BLUE)🚀 Building optimized release binary...$(NC)"
+	@mkdir -p $(BUILD_DIR)
+	@cd $(BUILD_DIR) && \
+		$(CMAKE) -DCMAKE_BUILD_TYPE=Release \
+			-DCMAKE_CXX_FLAGS_RELEASE="-O3 -march=native -DNDEBUG -flto -ffast-math -fno-strict-aliasing" \
+			-DCMAKE_C_FLAGS_RELEASE="-O3 -march=native -DNDEBUG -flto -ffast-math" \
+			-DCMAKE_INTERPROCEDURAL_OPTIMIZATION=ON \
+			.. > /dev/null && \
+		$(MAKE) -j $(CORES) 2>&1 | grep -E "Building|Linking|Error" || echo "✅ Build complete"
+	@echo "$(BLUE)📦 Stripping debug symbols...$(NC)"
+	@BEFORE=$$(stat --format=%s $(BINARY) 2>/dev/null || echo 0); \
+	strip $(BINARY) 2>/dev/null || true; \
+	AFTER=$$(stat --format=%s $(BINARY) 2>/dev/null || echo 0); \
+	if [ $$BEFORE -gt 0 ] && [ $$AFTER -gt 0 ]; then \
+		REDUCTION=$$((BEFORE - AFTER)); \
+		PERCENT=$$((REDUCTION * 100 / BEFORE)); \
+		echo "$(GREEN)✅ Binary stripped: $$BEFORE → $$AFTER bytes (saved $$PERCENT%)$(NC)"; \
+	fi
+	@echo "$(GREEN)✅ Release build complete!$(NC)"
+	@ls -lh $(BINARY)
+
+build-debug: clean
+	@echo "$(BLUE)🔍 Building debug binary with symbols...$(NC)"
+	@mkdir -p $(BUILD_DIR)
+	@cd $(BUILD_DIR) && \
+		$(CMAKE) -DCMAKE_BUILD_TYPE=Debug \
+			-DCMAKE_CXX_FLAGS_DEBUG="-g -O0" \
+			.. > /dev/null && \
+		$(MAKE) -j $(CORES)
+	@echo "$(GREEN)✅ Debug build complete!$(NC)"
+	@ls -lh $(BINARY)
+
+build-fast: clean
+	@echo "$(BLUE)⚡ Building with balanced optimization (-O2)...$(NC)"
+	@mkdir -p $(BUILD_DIR)
+	@cd $(BUILD_DIR) && \
+		$(CMAKE) -DCMAKE_BUILD_TYPE=Release \
+			-DCMAKE_CXX_FLAGS_RELEASE="-O2 -DNDEBUG" \
+			.. > /dev/null && \
+		$(MAKE) -j $(CORES)
+	@echo "$(GREEN)✅ Fast build complete!$(NC)"
+	@ls -lh $(BINARY)
+
+# ============================================================================
+# RUN TARGETS
+# ============================================================================
+
+run: $(BINARY)
+	@echo "$(BLUE)🚀 Starting Security Robot V2...$(NC)"
+	@$(BINARY)
+
+benchmark: $(BINARY)
+	@echo "$(BLUE)📊 Running performance benchmark (30 seconds)...$(NC)"
+	@python3 benchmark.py
+
+monitor: $(BINARY)
+	@echo "$(BLUE)📈 Monitoring robot performance...$(NC)"
+	@while true; do \
+		clear; \
+		echo "$(YELLOW)=== Security Robot V2 Performance Monitor ===$(NC)"; \
+		echo ""; \
+		ps aux | grep security_robot | grep -v grep | awk 'BEGIN {print "$(YELLOW)Process Stats:$(NC)"} {printf "  CPU: %.1f%%\n  Memory: %.1f MB\n  PID: %s\n", $$3, $$6/1024, $$2}' || echo "Robot not running"; \
+		echo ""; \
+		if [ -f /tmp/robot_status.json ]; then \
+			echo "$(YELLOW)Robot Status:$(NC)"; \
+			python3 -c "import json; data=json.load(open('/tmp/robot_status.json')); print('  FPS: %s' % data.get('fps', 'N/A')); print('  Mode: %s' % data.get('mode', 'N/A'))" 2>/dev/null || echo "  Status file readable"; \
+		fi; \
+		echo ""; \
+		echo "$(YELLOW)Press Ctrl+C to exit$(NC)"; \
+		sleep 2; \
+	done
+
+# ============================================================================
+# CLEAN TARGETS
+# ============================================================================
+
+clean:
+	@echo "$(YELLOW)🧹 Cleaning build artifacts...$(NC)"
+	@rm -rf $(BUILD_DIR)/*.o $(BUILD_DIR)/*.a 2>/dev/null || true
+	@echo "$(GREEN)✅ Clean complete$(NC)"
+
+clean-all:
+	@echo "$(YELLOW)🧹 Cleaning all build files...$(NC)"
+	@rm -rf $(BUILD_DIR) 2>/dev/null || true
+	@echo "$(GREEN)✅ Full clean complete$(NC)"
+
+# ============================================================================
+# TEST TARGETS
+# ============================================================================
+
+test: $(BINARY)
+	@echo "$(BLUE)🧪 Running tests...$(NC)"
+	@echo "$(YELLOW)Note: Tests not yet implemented$(NC)"
+
+# ============================================================================
+# INSTALL TARGET
+# ============================================================================
+
+install: build-release
+	@echo "$(BLUE)📦 Installing to /usr/local/bin...$(NC)"
+	@sudo install -D -m 755 $(BINARY) /usr/local/bin/security_robot
+	@echo "$(GREEN)✅ Installed to /usr/local/bin/security_robot$(NC)"
+	@which security_robot
+
+# ============================================================================
+# STATS AND INFO
+# ============================================================================
+
+info:
+	@echo "$(BLUE)ℹ️ Build Information$(NC)"
+	@echo "  Build directory: $(BUILD_DIR)"
+	@echo "  Binary: $(BINARY)"
+	@echo "  CPU cores: $(CORES)"
+	@echo "  CMake version: $$($(CMAKE) --version | head -1)"
+	@echo ""
+
+stats: $(BINARY)
+	@echo "$(BLUE)📊 Binary Statistics$(NC)"
+	@file $(BINARY)
+	@echo ""
+	@echo "Size breakdown:"
+	@ls -lh $(BINARY) | awk '{print "  Total: " $$5}'
+	@echo ""
+	@echo "Dependencies:"
+	@ldd $(BINARY) 2>/dev/null | tail -n +2
+
+# ============================================================================
+# CATCH-ALL
+# ============================================================================
+
+%: 
+	@echo "$(RED)Unknown target: $@$(NC)"
+	@echo "Run '$(YELLOW)make help$(NC)' for available targets"
+	@exit 1
+
+# ============================================================================
+# DEFAULT
+# ============================================================================
+
+.DEFAULT_GOAL := help

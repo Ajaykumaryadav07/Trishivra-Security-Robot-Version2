@@ -1,0 +1,10 @@
+robot:
+  name: security_robot_v2
+  mode: patrol
+  camera: true
+  telemetry: true
+
+
+telegram:
+  token: "8801377633:AAHYETiBDKpIBPqmiLkns964fBiRDtonhKo"
+  chat_id: "1099781876"

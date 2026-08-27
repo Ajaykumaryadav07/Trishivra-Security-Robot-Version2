@@ -1,0 +1,7 @@
+waypoints:
+  - name: entry
+    action: F
+    duration: 2.0
+  - name: checkpoint
+    action: R
+    duration: 1.0

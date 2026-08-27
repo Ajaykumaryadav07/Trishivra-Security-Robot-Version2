@@ -1,0 +1,8 @@
+{
+  "name": "security-robot-v2",
+  "version-string": "0.1.0",
+  "description": "C++ dependencies for the Security Robot V2 project",
+  "dependencies": [
+    "opencv4"
+  ]
+}

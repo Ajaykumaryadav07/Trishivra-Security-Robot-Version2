@@ -1,0 +1,17 @@
+C:\msys64\mingw64\bin\cmake.exe -SC:\Users\user\Videos\Trishivra\-Trishivra-Robotics-AI-security-guard-robot-version1-\security_robot_v2 -BC:\Users\user\Videos\Trishivra\-Trishivra-Robotics-AI-security-guard-robot-version1-\security_robot_v2\build --check-build-system CMakeFiles\Makefile.cmake 0
+C:\msys64\mingw64\bin\cmake.exe -E cmake_progress_start C:\Users\user\Videos\Trishivra\-Trishivra-Robotics-AI-security-guard-robot-version1-\security_robot_v2\build\CMakeFiles C:\Users\user\Videos\Trishivra\-Trishivra-Robotics-AI-security-guard-robot-version1-\security_robot_v2\build\\CMakeFiles\progress.marks
+C:/msys64/mingw64/bin/mingw32-make.exe  -f CMakeFiles\Makefile2 all
+mingw32-make[1]: Entering directory 'C:/Users/user/Videos/Trishivra/-Trishivra-Robotics-AI-security-guard-robot-version1-/security_robot_v2/build'
+C:/msys64/mingw64/bin/mingw32-make.exe  -f CMakeFiles\security_robot.dir\build.make CMakeFiles/security_robot.dir/depend
+mingw32-make[2]: Entering directory 'C:/Users/user/Videos/Trishivra/-Trishivra-Robotics-AI-security-guard-robot-version1-/security_robot_v2/build'
+C:\msys64\mingw64\bin\cmake.exe -E cmake_depends "MinGW Makefiles" C:\Users\user\Videos\Trishivra\-Trishivra-Robotics-AI-security-guard-robot-version1-\security_robot_v2 C:\Users\user\Videos\Trishivra\-Trishivra-Robotics-AI-security-guard-robot-version1-\security_robot_v2 C:\Users\user\Videos\Trishivra\-Trishivra-Robotics-AI-security-guard-robot-version1-\security_robot_v2\build C:\Users\user\Videos\Trishivra\-Trishivra-Robotics-AI-security-guard-robot-version1-\security_robot_v2\build C:\Users\user\Videos\Trishivra\-Trishivra-Robotics-AI-security-guard-robot-version1-\security_robot_v2\build\CMakeFiles\security_robot.dir\DependInfo.cmake "--color=" security_robot
+mingw32-make[2]: Leaving directory 'C:/Users/user/Videos/Trishivra/-Trishivra-Robotics-AI-security-guard-robot-version1-/security_robot_v2/build'
+C:/msys64/mingw64/bin/mingw32-make.exe  -f CMakeFiles\security_robot.dir\build.make CMakeFiles/security_robot.dir/build
+mingw32-make[2]: Entering directory 'C:/Users/user/Videos/Trishivra/-Trishivra-Robotics-AI-security-guard-robot-version1-/security_robot_v2/build'
+[  9%] Building CXX object CMakeFiles/security_robot.dir/src/main.cpp.obj
+C:\msys64\mingw64\bin\c++.exe -DPROJECT_TMP_DIR=\"C:\msys64\tmp\" @CMakeFiles/security_robot.dir/includes_CXX.rsp -std=gnu++17 -MD -MT CMakeFiles/security_robot.dir/src/main.cpp.obj -MF CMakeFiles\security_robot.dir\src\main.cpp.obj.d -o CMakeFiles\security_robot.dir\src\main.cpp.obj -c C:\Users\user\Videos\Trishivra\-Trishivra-Robotics-AI-security-guard-robot-version1-\security_robot_v2\src\main.cpp
+mingw32-make[2]: *** [CMakeFiles\security_robot.dir\build.make:79: CMakeFiles/security_robot.dir/src/main.cpp.obj] Error 1
+mingw32-make[2]: Leaving directory 'C:/Users/user/Videos/Trishivra/-Trishivra-Robotics-AI-security-guard-robot-version1-/security_robot_v2/build'
+mingw32-make[1]: *** [CMakeFiles\Makefile2:86: CMakeFiles/security_robot.dir/all] Error 2
+mingw32-make[1]: Leaving directory 'C:/Users/user/Videos/Trishivra/-Trishivra-Robotics-AI-security-guard-robot-version1-/security_robot_v2/build'
+mingw32-make: *** [Makefile:135: all] Error 2

@@ -1,0 +1,7 @@
+# Optional packages not needed for the current default flow
+picamera2>=0.3.0,<0.4.0
+pyttsx3>=2.7.0,<3.0.0
+SpeechRecognition>=3.10.0,<4.0.0
+pyaudio>=0.2.14,<0.3.0
+openvino>=2025.0.0
+ultralytics>=8.0.0,<9.0.0

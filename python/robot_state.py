@@ -28,7 +28,11 @@ logger = logging.getLogger(__name__)
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 CONFIG_FILE = PROJECT_ROOT / "config" / "robot_settings.json"
-WAYPOINTS_FILE = PROJECT_ROOT / "config" / "waypoints.json"
+WAYPOINTS_FILE = PROJECT_ROOT / "config" / "waypoints.yaml"
+LEGACY_WAYPOINTS_FILE = PROJECT_ROOT / "config" / "waypoints.json"
+
+if not WAYPOINTS_FILE.exists() and LEGACY_WAYPOINTS_FILE.exists():
+    WAYPOINTS_FILE = LEGACY_WAYPOINTS_FILE
 
 # ============================================================
 # Robot State Class
@@ -130,13 +134,35 @@ class RobotState:
         return {}
     
     def load_waypoints(self) -> list:
-        """Load waypoints from JSON file."""
-        try:
-            if WAYPOINTS_FILE.exists():
-                with open(WAYPOINTS_FILE, 'r') as f:
-                    return json.load(f)
-        except Exception as e:
-            logger.error(f"❌ Failed to load waypoints: {e}")
+        """Load waypoint metadata from YAML or legacy JSON config."""
+        candidates = []
+        for path in (WAYPOINTS_FILE, LEGACY_WAYPOINTS_FILE):
+            if path.exists():
+                candidates.append(path)
+
+        for path in candidates:
+            try:
+                with open(path, 'r', encoding='utf-8') as f:
+                    if path.suffix.lower() in {'.yaml', '.yml'}:
+                        try:
+                            import yaml
+                        except ImportError:
+                            logger.error("❌ PyYAML is required to read YAML waypoint files.")
+                            continue
+                        data = yaml.safe_load(f) or {}
+                    else:
+                        data = json.load(f)
+
+                if isinstance(data, dict):
+                    entries = data.get('waypoints', data.get('routes', []))
+                else:
+                    entries = data
+
+                if isinstance(entries, list):
+                    return entries
+            except Exception as e:
+                logger.error(f"❌ Failed to load waypoints from {path}: {e}")
+
         return []
     
     # ============================================================

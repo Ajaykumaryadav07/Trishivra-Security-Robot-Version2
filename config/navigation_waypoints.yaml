@@ -1,0 +1,18 @@
+%YAML:1.0
+---
+navigation:
+   mode: "simulation"
+   autonomous_movement: 0
+   require_gps: 1
+   initial_heading_deg: 0.0
+
+# GPS course over ground is used for heading after the robot has moved several
+# meters. Manually point the robot north before starting this northbound route.
+# Keep motion disabled until the route has been tested with the wheels raised.
+enabled: 0
+waypoints:
+   - { name: "Start at Mandir", lat: 26.886653, lon: 81.056797 }
+   - { name: "After Little Turn Left (50m North)", lat: 26.887103, lon: 81.056797 }
+   - { name: "After Little Turn Right (50m West)", lat: 26.887103, lon: 81.056347 }
+   - { name: "After Hard Turn Right (100m South)", lat: 26.886203, lon: 81.056347 }
+   - { name: "Arrive at Stadium (50m East)", lat: 26.886203, lon: 81.056797 }

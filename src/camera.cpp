@@ -7,7 +7,6 @@
 #include <fstream>
 #include <sstream>
 #include <cstdlib>
-#include <filesystem>
 
 // ============================================================
 // CameraModule Implementation
@@ -33,10 +32,6 @@ std::string CameraModule::get_camera_type_name() const {
     switch (camera_type) {
         case CameraType::PI_CAMERA:
             return "Pi Camera Module (libcamera)";
-        case CameraType::USB_CAMERA:
-            return "USB Webcam";
-        case CameraType::V4L2_DEVICE:
-            return "V4L2 Video Device";
         case CameraType::UNKNOWN:
         default:
             return "Unknown Camera";
@@ -48,10 +43,6 @@ std::string CameraModule::get_camera_type_name() const {
 // ============================================================
 
 bool CameraModule::detect_pi_camera() {
-    std::cout << "[CAMERA] 🔍 Detecting Pi Camera Module..." << std::endl;
-    
-    // Check for libcamera availability on Raspberry Pi
-    // Check device tree or /proc for Pi camera
     std::ifstream dt_file("/proc/device-tree/model");
     if (dt_file.is_open()) {
         std::string model;
@@ -59,135 +50,15 @@ bool CameraModule::detect_pi_camera() {
         dt_file.close();
         
         if (model.find("Raspberry Pi") != std::string::npos) {
-            std::cout << "[CAMERA] ✓ Raspberry Pi detected: " << model << std::endl;
-            
-            // Check if libcamera is available
-            int ret = system("which libcamera-hello >/dev/null 2>&1");
-            if (ret == 0) {
-                std::cout << "[CAMERA] ✓ libcamera is available" << std::endl;
-                
-                // Check if camera device exists (/base/soc/i2c0mux/i2c@1/imx708@1a for Pi 5, etc)
-                // Or check /dev/video* for camera
-                for (int i = 0; i < 4; ++i) {
-                    std::string dev_path = "/dev/video" + std::to_string(i);
-                    std::ifstream dev_file(dev_path);
-                    if (dev_file.is_open()) {
-                        dev_file.close();
-                        
-                        // Try to open with V4L2/libcamera backend
-                        cv::VideoCapture test_cap;
-#ifdef CV_CAP_V4L2
-                        test_cap.open(i, cv::CAP_V4L2);
-#else
-                        test_cap.open(i);
-#endif
-                        
-                        if (test_cap.isOpened()) {
-                            double backend = test_cap.get(cv::CAP_PROP_BACKEND_ID);
-                            
-                            // Check if it's the main video device (usually /dev/video0 on Pi)
-                            if (i == 0 || backend != cv::CAP_V4L2) {
-                                test_cap.release();
-                                camera_type = CameraType::PI_CAMERA;
-                                std::cout << "[CAMERA] ✅ Pi Camera Module detected at /dev/video" << i << std::endl;
-                                return true;
-                            }
-                            test_cap.release();
-                        }
-                    }
-                }
-            }
+            camera_type = CameraType::PI_CAMERA;
+            std::cout << "[CAMERA] Raspberry Pi detected: " << model << std::endl;
+            std::cout << "[CAMERA] Will open CSI camera through libcamera/GStreamer" << std::endl;
+            return true;
         }
     }
     
     camera_type = CameraType::UNKNOWN;
     return false;
-}
-
-// ============================================================
-// Detect USB Camera
-// ============================================================
-
-bool CameraModule::detect_usb_camera(int start_index) {
-    std::cout << "[CAMERA] 🔍 Detecting USB Camera..." << std::endl;
-    
-    // Try standard USB camera indices
-    int indices[] = {0, 1, 2, 3};
-    int start = (start_index > 0) ? start_index : 0;
-    
-    for (int idx = start; idx <= 3; ++idx) {
-        std::string dev_path = "/dev/video" + std::to_string(idx);
-        
-        // Check if device exists
-        std::ifstream dev_file(dev_path);
-        if (!dev_file.is_open()) {
-            continue;
-        }
-        dev_file.close();
-        
-        std::cout << "[CAMERA] Trying " << dev_path << std::endl;
-        
-        // Try to open camera
-        cv::VideoCapture test_cap;
-#ifdef CV_CAP_V4L2
-        test_cap.open(idx, cv::CAP_V4L2);
-#else
-        test_cap.open(idx);
-#endif
-        
-        if (test_cap.isOpened()) {
-            // Verify we can actually read from it
-            cv::Mat test_frame;
-            if (test_cap.read(test_frame) && !test_frame.empty()) {
-                test_cap.release();
-                camera_type = CameraType::USB_CAMERA;
-                std::cout << "[CAMERA] ✅ USB Camera detected at /dev/video" << idx << std::endl;
-                return true;
-            }
-            
-            test_cap.release();
-        }
-    }
-    
-    camera_type = CameraType::UNKNOWN;
-    return false;
-}
-
-// ============================================================
-// Identify Camera Type
-// ============================================================
-
-CameraType CameraModule::identify_camera_type(int index) {
-    std::cout << "[CAMERA] Identifying camera type at index " << index << std::endl;
-    
-    // First try to detect Pi Camera
-    if (detect_pi_camera()) {
-        return camera_type;
-    }
-    
-    // Then try USB camera
-    if (detect_usb_camera(index)) {
-        return camera_type;
-    }
-    
-    // V4L2 fallback
-    cv::VideoCapture test_cap;
-#ifdef CV_CAP_V4L2
-    test_cap.open(index, cv::CAP_V4L2);
-#else
-    test_cap.open(index);
-#endif
-    
-    if (test_cap.isOpened()) {
-        test_cap.release();
-        camera_type = CameraType::V4L2_DEVICE;
-        std::cout << "[CAMERA] ⚠️  Generic V4L2 device detected at index " << index << std::endl;
-        return camera_type;
-    }
-    
-    camera_type = CameraType::UNKNOWN;
-    std::cout << "[CAMERA] ❌ No camera detected" << std::endl;
-    return camera_type;
 }
 
 // ============================================================
@@ -202,32 +73,38 @@ bool CameraModule::init(int width, int height, int fps) {
     this->fps = fps;
     
     try {
-        // First identify camera type
-        identify_camera_type(0);
-        
+        if (!detect_pi_camera()) {
+            std::cerr << "[CAMERA] ❌ Raspberry Pi camera is only supported camera" << std::endl;
+            return false;
+        }
+
         std::cout << "[CAMERA] Camera type: " << get_camera_type_name() << std::endl;
-        
-        // Try V4L2 first (better for Raspberry Pi)
-#ifdef CV_CAP_V4L2
-        cap.open(0, cv::CAP_V4L2);
-#else
-        cap.open(0);
-#endif
-        
-        if (!cap.isOpened()) {
-            // Fallback to default
-            cap.open(0);
+
+        const std::string pipeline =
+            "libcamerasrc ! video/x-raw,width=" + std::to_string(width) +
+            ",height=" + std::to_string(height) + ",framerate=" +
+            std::to_string(fps) +
+            "/1 ! videoconvert ! video/x-raw,format=BGR ! "
+            "appsink drop=true max-buffers=1";
+        if (!cap.open(pipeline, cv::CAP_GSTREAMER)) {
+            std::cerr << "[CAMERA] ❌ Could not open CSI camera with libcamera/GStreamer. "
+                         "Check the camera connection and GStreamer libcamera plugin."
+                      << std::endl;
+            return false;
         }
         
         if (!cap.isOpened()) {
             std::cerr << "[CAMERA] ❌ Failed to open camera!" << std::endl;
             return false;
         }
-        
-        // Set camera properties
-        cap.set(cv::CAP_PROP_FRAME_WIDTH, width);
-        cap.set(cv::CAP_PROP_FRAME_HEIGHT, height);
-        cap.set(cv::CAP_PROP_FPS, fps);
+
+        cv::Mat test_frame;
+        if (!cap.read(test_frame) || test_frame.empty()) {
+            std::cerr << "[CAMERA] ❌ Opened camera but could not capture a frame!" << std::endl;
+            cap.release();
+            camera_type = CameraType::UNKNOWN;
+            return false;
+        }
         
         // Verify actual settings
         int actual_width = static_cast<int>(cap.get(cv::CAP_PROP_FRAME_WIDTH));
@@ -296,18 +173,17 @@ bool CameraModule::capture(cv::Mat& frame) {
 void CameraModule::release() {
     if (cap.isOpened()) {
         cap.release();
-        initialized = false;
-        camera_type = CameraType::UNKNOWN;
-        night_mode = false;
-        
-        // Turn off IR LED if supported
-        try {
-            set_ir_led(false);
-        } catch (...) {
-            // Ignore if GPIO not available
-        }
-        
         std::cout << "[CAMERA] Released" << std::endl;
+    }
+    initialized = false;
+    camera_type = CameraType::UNKNOWN;
+    night_mode = false;
+
+    // Turn off IR LED if supported
+    try {
+        set_ir_led(false);
+    } catch (...) {
+        // Ignore if GPIO not available
     }
 }
 

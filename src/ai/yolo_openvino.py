@@ -25,21 +25,30 @@ logger = logging.getLogger(__name__)
 class YOLOOpenVINO:
     """
     YOLO Object Detection using OpenVINO INT8 quantization
-    Optimized for Raspberry Pi 4 (6 FPS)
+    Optimized for Raspberry Pi 4 (10 FPS)
     """
     
     def __init__(self,
-                 model_xml_path="models/yolov8n.xml",
-                 model_bin_path="models/yolov8n.bin",
+                 model_xml_path="models/best_openvino_model/best.xml",
+                 model_bin_path="models/best_openvino_model/best.bin",
                  confidence_threshold=0.5,
                  nms_threshold=0.45,
-                 input_size=320):
+                 input_size=640):
         
         self.model_xml_path = model_xml_path
         self.model_bin_path = model_bin_path
         self.confidence_threshold = confidence_threshold
         self.nms_threshold = nms_threshold
         self.input_size = input_size
+        names_path = Path(model_xml_path).with_suffix(".names")
+        try:
+            self.class_names = [
+                line.strip()
+                for line in names_path.read_text(encoding="utf-8").splitlines()
+                if line.strip()
+            ]
+        except OSError:
+            self.class_names = ["person", "weapon", "vehicle", "fire"]
         self.compiled_model = None
         self.input_layer = None
         self.output_layer = None
@@ -92,6 +101,7 @@ class YOLOOpenVINO:
         
         # Resize to model input size
         resized = cv2.resize(frame, (self.input_size, self.input_size))
+        resized = cv2.cvtColor(resized, cv2.COLOR_BGR2RGB)
         
         # Convert to float and normalize
         blob = np.array(resized, dtype=np.float32) / 255.0
@@ -107,17 +117,28 @@ class YOLOOpenVINO:
         Decode YOLO output to bounding boxes
         """
         detections = []
-        
-        # YOLOv8 output format: [1, 84, 8400]
-        # 84 = 4 (bbox) + 80 (classes)
-        # 8400 = number of predictions
-        
-        output = output.squeeze()  # (84, 8400)
-        
-        # For YOLOv8, output is (84, 8400)
-        # 4 bbox coords + 80 class probs
-        bbox = output[:4, :]      # (4, 8400)
-        scores = output[4:, :]    # (80, 8400)
+        output = np.asarray(output)
+        while output.ndim > 2 and output.shape[0] == 1:
+            output = output[0]
+        if output.ndim != 2:
+            logger.error("Unexpected YOLO output shape: %s", output.shape)
+            return []
+
+        feature_count = len(self.class_names) + 4
+        if output.shape[0] == feature_count:
+            pass
+        elif output.shape[1] == feature_count:
+            output = output.T
+        else:
+            logger.error(
+                "YOLO output has %s features; expected %s for configured labels",
+                min(output.shape),
+                feature_count,
+            )
+            return []
+
+        bbox = output[:4, :]
+        scores = output[4:, :]
         
         # Get class with max score
         class_ids = np.argmax(scores, axis=0)        # (8400,)
@@ -129,60 +150,28 @@ class YOLOOpenVINO:
         class_ids = class_ids[valid_indices]
         max_scores = max_scores[valid_indices]
         
-        # Decode bbox
-        # YOLOv8: cx, cy, w, h (normalized)
+        # YOLOv8 exports center, size coordinates in input-image pixels.
         cx = bbox[0, :]
         cy = bbox[1, :]
         w = bbox[2, :]
         h = bbox[3, :]
-        
-        # Convert to xyxy
-        x1 = (cx - w / 2) * original_shape[1]
-        y1 = (cy - h / 2) * original_shape[0]
-        x2 = (cx + w / 2) * original_shape[1]
-        y2 = (cy + h / 2) * original_shape[0]
-        
-        # Class names (COCO)
-        class_names = [
-            "person", "bicycle", "car", "motorbike", "aeroplane", "bus", "train", "truck",
-            "boat", "traffic light", "fire hydrant", "stop sign", "parking meter", "bench",
-            "bird", "cat", "dog", "horse", "sheep", "cow", "elephant", "bear", "zebra", "giraffe",
-            "backpack", "umbrella", "handbag", "tie", "suitcase", "frisbee", "skis", "snowboard",
-            "sports ball", "kite", "baseball bat", "baseball glove", "skateboard", "surfboard",
-            "tennis racket", "bottle", "wine glass", "cup", "fork", "knife", "spoon", "bowl",
-            "banana", "apple", "sandwich", "orange", "broccoli", "carrot", "hot dog", "pizza",
-            "donut", "cake", "chair", "sofa", "pottedplant", "bed", "diningtable", "toilet",
-            "tvmonitor", "laptop", "mouse", "remote", "keyboard", "cell phone", "microwave",
-            "oven", "toaster", "sink", "refrigerator", "book", "clock", "vase", "scissors",
-            "teddy bear", "hair drier", "toothbrush"
-        ]
-        
-        # Custom classes for security robot
-        custom_classes = {
-            0: "person",   # COCO: person
-            1: "weapon",   # Custom
-            2: "fire"      # Custom
-        }
-        
-        # Build detections
+
+        scale_x = original_shape[1] / self.input_size
+        scale_y = original_shape[0] / self.input_size
+        x1 = (cx - w / 2) * scale_x
+        y1 = (cy - h / 2) * scale_y
+        x2 = (cx + w / 2) * scale_x
+        y2 = (cy + h / 2) * scale_y
+
         for i in range(len(x1)):
-            # Check if object is in our target classes
-            if class_ids[i] >= len(class_names):
+            if class_ids[i] >= len(self.class_names):
                 continue
-            
-            # Get class name
-            class_name = class_names[class_ids[i]]
-            confidence = float(max_scores[i])
-            
-            # For custom classes, we'd need a custom model
-            # For now, use COCO classes
-            
-            # Only keep person, and we'll simulate weapon/fire
+
             det = {
-                'class': class_name,
-                'confidence': confidence,
+                'class': self.class_names[class_ids[i]],
+                'confidence': float(max_scores[i]),
                 'bbox': [int(x1[i]), int(y1[i]), int(x2[i]), int(y2[i])],
-                'class_id': int(class_ids[i])
+                'class_id': int(class_ids[i]),
             }
             detections.append(det)
         
@@ -351,6 +340,8 @@ def convert_yolo_to_openvino(yolo_model_path="yolov8n.pt",
 # ============================================================
 
 if __name__ == "__main__":
+    from python.camera_handler import CameraHandler
+
     # Initialize detector
     detector = YOLOOpenVINO(
         model_xml_path="models/yolov8n.xml",
@@ -361,13 +352,12 @@ if __name__ == "__main__":
     )
     
     # Test on a frame
-    cap = cv2.VideoCapture(0)
-    cap.set(cv2.CAP_PROP_FPS, 6)
+    camera = CameraHandler(camera_type="pi_camera", width=640, height=480, fps=10)
     
     print("📸 Starting camera test (Press 'q' to quit)...")
     
     while True:
-        ret, frame = cap.read()
+        ret, frame = camera.read()
         if not ret:
             break
         
@@ -386,7 +376,7 @@ if __name__ == "__main__":
         if cv2.waitKey(1) & 0xFF == ord('q'):
             break
         
-        time.sleep(0.166)  # 6 FPS
+        time.sleep(0.1)  # 10 FPS
     
-    cap.release()
+    camera.release()
     cv2.destroyAllWindows()

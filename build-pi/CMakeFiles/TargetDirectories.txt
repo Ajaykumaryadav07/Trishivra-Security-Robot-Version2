@@ -1,0 +1,7 @@
+/home/trishivra/security_robot_v2/build-pi/CMakeFiles/security_robot.dir
+/home/trishivra/security_robot_v2/build-pi/CMakeFiles/edit_cache.dir
+/home/trishivra/security_robot_v2/build-pi/CMakeFiles/rebuild_cache.dir
+/home/trishivra/security_robot_v2/build-pi/CMakeFiles/list_install_components.dir
+/home/trishivra/security_robot_v2/build-pi/CMakeFiles/install.dir
+/home/trishivra/security_robot_v2/build-pi/CMakeFiles/install/local.dir
+/home/trishivra/security_robot_v2/build-pi/CMakeFiles/install/strip.dir

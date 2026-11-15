@@ -27,6 +27,7 @@ struct RobotStateData {
     bool fire_detected = false;
     int person_count = 0;
     int weapon_count = 0;
+    int vehicle_count = 0;
     int fire_count = 0;
     
     // Obstacles

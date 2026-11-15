@@ -1,19 +1,15 @@
 #include "robot_modules.h"
 #include "config.h"
 #include <iostream>
-#include <chrono>
+#include <limits>
 
 // ============================================================
 // DepthEstimator Implementation
 // ============================================================
 
 DepthEstimator::DepthEstimator() : use_midas(false), model(nullptr), initialized(false) {
-    std::cout << "[DEPTH] Initializing depth estimator..." << std::endl;
-    
-    // Try to initialize MiDaS if available
-    // For now, use simple OpenCV-based depth estimation
-    initialized = true;
-    std::cout << "[DEPTH] Using simple depth estimation (MiDaS optional)" << std::endl;
+    std::cout << "[DEPTH] Disabled: no calibrated metric depth model is configured"
+              << std::endl;
 }
 
 DepthEstimator::~DepthEstimator() {
@@ -26,83 +22,13 @@ DepthEstimator::~DepthEstimator() {
 }
 
 cv::Mat DepthEstimator::estimate(const cv::Mat& frame) {
-    if (frame.empty() || !initialized) {
-        return cv::Mat();
-    }
-    
-    try {
-        // ============================================================
-        // Option 1: Simple OpenCV-based depth estimation
-        // Works on any system, low CPU usage
-        // ============================================================
-        
-        cv::Mat gray, depth_map;
-        cv::cvtColor(frame, gray, cv::COLOR_BGR2GRAY);
-        depth_map = cv::Mat(gray.size(), CV_32F);
-        
-        // Simple depth estimation using Laplacian variance
-        // Brighter = more in focus = closer
-        // This is a very simple proxy for depth
-        
-        cv::Mat laplacian;
-        cv::Laplacian(gray, laplacian, CV_64F);
-        
-        // Normalize and convert to depth map
-        double min_val, max_val;
-        cv::minMaxLoc(laplacian, &min_val, &max_val);
-        
-        if (max_val > min_val) {
-            laplacian.convertTo(depth_map, CV_32F, 1.0 / (max_val - min_val));
-        } else {
-            depth_map.setTo(0.5f);
-        }
-        
-        // Invert: higher Laplacian = closer
-        depth_map = 1.0f - depth_map;
-        
-        // Clamp to reasonable range (0.1m to 5.0m)
-        depth_map = depth_map * 4.9f + 0.1f;
-        
-        // Apply Gaussian blur to smooth
-        cv::GaussianBlur(depth_map, depth_map, cv::Size(5, 5), 1.0);
-        
-        return depth_map;
-        
-        // ============================================================
-        // Option 2: MiDaS depth estimation (if available)
-        // More accurate, requires model file
-        // ============================================================
-        
-        /*
-        if (use_midas && model) {
-            // MiDaS inference code here
-            // cv::Mat resized_frame;
-            // cv::resize(frame, resized_frame, cv::Size(256, 256));
-            // 
-            // // Convert to float and normalize
-            // cv::Mat float_frame;
-            // resized_frame.convertTo(float_frame, CV_32FC3, 1.0 / 255.0);
-            // 
-            // // Run inference
-            // // depth_map = run_midas_inference(float_frame);
-            // 
-            // // Resize back to original size
-            // cv::resize(depth_map, depth_map, frame.size());
-            // 
-            // return depth_map;
-        }
-        */
-        
-    } catch (const std::exception& e) {
-        std::cerr << "[DEPTH] Error: " << e.what() << std::endl;
-        return cv::Mat();
-    }
+    (void)frame;
+    return cv::Mat();
 }
 
 float DepthEstimator::get_distance(const cv::Point& pixel) {
-    // This would query the depth map at a specific pixel
-    // For now, return default safe distance
-    return 2.0f;  // 2 meters default
+    (void)pixel;
+    return std::numeric_limits<float>::quiet_NaN();
 }
 
 // ============================================================

@@ -4,6 +4,7 @@
 #include <string>
 #include <vector>
 #include <opencv2/opencv.hpp>
+#include <opencv2/dnn.hpp>
 #include "robot_modules.h"
 
 // ============================================================
@@ -20,7 +21,8 @@ public:
     bool is_initialized() const { return initialized; }
 
 private:
-    void* model;
+    cv::dnn::Net model;
+    std::vector<std::string> class_names;
     float confidence_threshold;
     int img_size;
     bool initialized;

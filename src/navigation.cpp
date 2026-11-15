@@ -7,6 +7,106 @@
 #include <algorithm>
 #include <iostream>
 #include <limits>
+#include <utility>
+
+bool load_navigation_waypoints(const std::string& path,
+                               std::vector<Pose>& waypoints,
+                               std::string& mode,
+                               bool& autonomous_movement,
+                               bool& require_gps,
+                               double& initial_heading_deg,
+                               double& origin_latitude,
+                               double& origin_longitude) {
+    mode.clear();
+    autonomous_movement = false;
+    require_gps = true;
+    initial_heading_deg = 0.0;
+    origin_latitude = 0.0;
+    origin_longitude = 0.0;
+    try {
+        cv::FileStorage config(path, cv::FileStorage::READ);
+        if (!config.isOpened()) {
+            std::cerr << "[NAV] Cannot open waypoint config: " << path << std::endl;
+            return false;
+        }
+
+        const cv::FileNode navigation = config["navigation"];
+        int movement_enabled = 0;
+        int gps_required = 0;
+        navigation["mode"] >> mode;
+        navigation["autonomous_movement"] >> movement_enabled;
+        navigation["require_gps"] >> gps_required;
+        navigation["initial_heading_deg"] >> initial_heading_deg;
+        if ((mode != "simulation" && mode != "hardware") ||
+            (movement_enabled != 0 && movement_enabled != 1) ||
+            (gps_required != 0 && gps_required != 1) ||
+            !std::isfinite(initial_heading_deg) ||
+            initial_heading_deg < 0.0 || initial_heading_deg >= 360.0) {
+            std::cerr << "[NAV] Invalid navigation mode or safety settings"
+                      << std::endl;
+            return false;
+        }
+        autonomous_movement = movement_enabled == 1;
+        require_gps = gps_required == 1;
+
+        int enabled = 0;
+        config["enabled"] >> enabled;
+        const cv::FileNode entries = config["waypoints"];
+        if ((enabled != 0 && enabled != 1) || !entries.isSeq() ||
+            entries.empty() || entries.size() > 100) {
+            std::cerr << "[NAV] Route is invalid, empty, or too large: " << path
+                      << std::endl;
+            return false;
+        }
+
+        std::vector<Pose> loaded;
+        for (const cv::FileNode& entry : entries) {
+            const cv::FileNode lat = entry["lat"];
+            const cv::FileNode lon = entry["lon"];
+            const auto is_number = [](const cv::FileNode& node) {
+                return node.isInt() || node.isReal();
+            };
+            if (!entry.isMap() || !is_number(lat) || !is_number(lon)) {
+                std::cerr << "[NAV] GPS waypoint must contain numeric lat and lon"
+                          << std::endl;
+                return false;
+            }
+
+            double latitude = 0.0;
+            double longitude = 0.0;
+            lat >> latitude;
+            lon >> longitude;
+            if (!std::isfinite(latitude) || !std::isfinite(longitude) ||
+                latitude < -90.0 || latitude > 90.0 ||
+                longitude < -180.0 || longitude > 180.0) {
+                std::cerr << "[NAV] Invalid GPS waypoint in " << path << std::endl;
+                return false;
+            }
+            if (loaded.empty()) {
+                origin_latitude = latitude;
+                origin_longitude = longitude;
+            }
+            constexpr double meters_per_degree = 111320.0;
+            const double east = (longitude - origin_longitude) * meters_per_degree *
+                std::cos(origin_latitude * M_PI / 180.0);
+            const double north = (latitude - origin_latitude) * meters_per_degree;
+            if (std::abs(east) > 1000.0 || std::abs(north) > 1000.0) {
+                std::cerr << "[NAV] GPS route exceeds the 1 km safety limit"
+                          << std::endl;
+                return false;
+            }
+            Pose waypoint{static_cast<float>(east), static_cast<float>(north), 0.0f};
+            loaded.push_back(waypoint);
+        }
+
+        waypoints = std::move(loaded);
+        return enabled == 1;
+    } catch (const cv::Exception& error) {
+        std::cerr << "[NAV] Invalid waypoint config " << path << ": "
+                  << error.what() << std::endl;
+        return false;
+    }
+}
 
 // ============================================================
 // NavigationModule Implementation
@@ -30,6 +130,7 @@ NavigationModule::~NavigationModule() {
 void NavigationModule::set_waypoints(const std::vector<Pose>& waypoints) {
     this->waypoints = waypoints;
     current_waypoint_index = 0;
+    route_complete = waypoints.empty();
     path.clear();
     
     if (!waypoints.empty()) {
@@ -42,6 +143,7 @@ void NavigationModule::set_waypoints(const std::vector<Pose>& waypoints) {
 
 void NavigationModule::set_goal(const Pose& goal) {
     this->goal = goal;
+    route_complete = false;
     path.clear();
     std::cout << "[NAV] Goal set: (" << goal.x << ", " << goal.y << ")" << std::endl;
 }
@@ -306,19 +408,17 @@ std::vector<Pose> NavigationModule::a_star(const Pose& start, const Pose& goal) 
 
 VelocityCmd NavigationModule::get_velocity() {
     VelocityCmd cmd{0.0f, 0.0f};
-    
-    // Force a fresh plan when needed
-    if (path.empty()) {
-        plan_path();
-    }
-    
-    if (path.empty()) {
+    if (route_complete) {
         return cmd;
     }
-    
+
     if (is_goal_reached()) {
-        if (!waypoints.empty()) {
-            current_waypoint_index = (current_waypoint_index + 1) % waypoints.size();
+        if (current_waypoint_index + 1 >= waypoints.size()) {
+            route_complete = true;
+            path.clear();
+            std::cout << "[NAV] Patrol route complete" << std::endl;
+        } else {
+            ++current_waypoint_index;
             set_goal(waypoints[current_waypoint_index]);
             path.clear();
             std::cout << "[NAV] Advancing to waypoint " << current_waypoint_index << std::endl;
@@ -326,6 +426,15 @@ VelocityCmd NavigationModule::get_velocity() {
         return cmd;
     }
     
+    // Force a fresh plan when needed
+    if (path.empty()) {
+        plan_path();
+    }
+
+    if (path.empty()) {
+        return cmd;
+    }
+
     // Prune path points that are behind or very close
     while (path.size() > 1) {
         float dx = path[1].x - current_pose.x;
@@ -410,29 +519,6 @@ float NavigationModule::normalize_angle(float angle) {
     while (angle < -M_PI) angle += 2.0f * M_PI;
     return angle;
 }
-
-// ============================================================
-    
-    // Define ROI in front of robot (center region)
-    int start_x = std::max(0, center_x - roi_size);
-    int end_x = std::min(depth_map.cols, center_x + roi_size);
-    int start_y = std::max(0, center_y - 10);
-    int end_y = std::min(depth_map.rows, center_y + 40);  // Forward direction
-    
-    float min_depth = 100.0f;
-    
-    for (int y = start_y; y < end_y; y++) {
-        for (int x = start_x; x < end_x; x++) {
-            float depth = depth_map.at<float>(y, x);
-            if (depth > 0.1f && depth < min_depth) {
-                min_depth = depth;
-            }
-        }
-    }
-    
-    return min_depth < min_distance;
-}
-*/
 
 // ============================================================
 // Dynamic Replanning

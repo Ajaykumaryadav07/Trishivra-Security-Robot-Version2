@@ -1,7 +1,7 @@
-C:/Users/user/Videos/Trishivra/-Trishivra-Robotics-AI-security-guard-robot-version1-/security_robot_v2/build/CMakeFiles/security_robot.dir
-C:/Users/user/Videos/Trishivra/-Trishivra-Robotics-AI-security-guard-robot-version1-/security_robot_v2/build/CMakeFiles/edit_cache.dir
-C:/Users/user/Videos/Trishivra/-Trishivra-Robotics-AI-security-guard-robot-version1-/security_robot_v2/build/CMakeFiles/rebuild_cache.dir
-C:/Users/user/Videos/Trishivra/-Trishivra-Robotics-AI-security-guard-robot-version1-/security_robot_v2/build/CMakeFiles/list_install_components.dir
-C:/Users/user/Videos/Trishivra/-Trishivra-Robotics-AI-security-guard-robot-version1-/security_robot_v2/build/CMakeFiles/install.dir
-C:/Users/user/Videos/Trishivra/-Trishivra-Robotics-AI-security-guard-robot-version1-/security_robot_v2/build/CMakeFiles/install/local.dir
-C:/Users/user/Videos/Trishivra/-Trishivra-Robotics-AI-security-guard-robot-version1-/security_robot_v2/build/CMakeFiles/install/strip.dir
+/home/trishivra/security_robot_v2/build/CMakeFiles/security_robot.dir
+/home/trishivra/security_robot_v2/build/CMakeFiles/edit_cache.dir
+/home/trishivra/security_robot_v2/build/CMakeFiles/rebuild_cache.dir
+/home/trishivra/security_robot_v2/build/CMakeFiles/list_install_components.dir
+/home/trishivra/security_robot_v2/build/CMakeFiles/install.dir
+/home/trishivra/security_robot_v2/build/CMakeFiles/install/local.dir
+/home/trishivra/security_robot_v2/build/CMakeFiles/install/strip.dir

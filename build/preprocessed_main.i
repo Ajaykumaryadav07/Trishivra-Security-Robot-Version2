@@ -1,1 +1,0 @@
-"PREPROCESSING" ; C:\msys64\mingw64\bin\c++.exe -E -I C:\Users\user\Videos\Trishivra\-TRISH~1\security_robot_v2\include ..\src\main.cpp ; echo RET=2 ; if exist preprocess_err.txt type preprocess_err.txt

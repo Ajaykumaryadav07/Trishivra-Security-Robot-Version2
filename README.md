@@ -15,8 +15,8 @@ The repository includes:
 
 ### Hardware
 
-- Raspberry Pi 4/5 or a modern Linux desktop
-- Raspberry Pi Camera or USB camera
+- Raspberry Pi 4/5 for camera runtime; a modern Linux desktop can be used for development
+- Raspberry Pi Camera Module (CSI)
 - Optional: GPIO-connected motors, sensors, or an ESP32 bridge
 
 ### Software
@@ -24,7 +24,11 @@ The repository includes:
 - Python 3.10 or newer
 - pip and virtualenv
 - CMake and a C++17 compiler
-- OpenCV and supporting system libraries
+- OpenCV for image processing and supporting system libraries
+
+The camera runtime uses the Raspberry Pi CSI camera only; it does not fall back
+to a USB webcam or laptop camera. OpenCV remains required for frame processing,
+detection, and image saving.
 
 ## Quick Start
 
@@ -87,10 +91,14 @@ cmake --build build
 python3 run_robot.py
 ```
 
+The Python entry point provides camera monitoring and alerts; it does not
+directly drive the motors. The C++ binary owns GPS waypoint navigation and
+requires the motor controller, GPS receiver, and enabled route configuration.
+
 ### C++ binary
 
 ```bash
-./build/security_robot_v2
+./build/security_robot
 ```
 
 ## Configuration
@@ -98,9 +106,54 @@ python3 run_robot.py
 The main settings are stored under the config folder:
 
 - config/robot_settings.yaml: robot behavior and system settings
-- config/waypoints.yaml: patrol and navigation waypoints
+- config/waypoints.yaml: action/duration patrol metadata for the Python guard
+- config/navigation_waypoints.yaml: GPS coordinates and autonomous-drive safety gates
+
+Autonomous navigation uses the NEO-6M for position and the MPU-6050 gyro for
+short-term heading feedback. The trail remains disabled by default until the
+hardware is tested and its coordinates and starting heading are confirmed. The
+existing ESP32 ultrasonic sensors remain the obstacle safety layer.
+
+The NEO-6M has no reliable heading while stationary. The MPU-6050 gyro supplies
+short-term relative heading for steering, but has no compass and will drift over
+time. Set `initial_heading_deg` to the robot's actual starting compass bearing
+and align the robot to that direction before starting; heading hold is only as
+good as this alignment and the gyro calibration. It stops on stale/lost GPS or
+IMU data and after the final waypoint. This experimental GPS/IMU navigation is
+not suitable for roads, people, or other uncontrolled environments. Test only
+in a clear, private area with an operator at an accessible physical emergency
+stop.
+
+### MPU-6050 on Raspberry Pi
+
+Connect the MPU-6050 to the Pi's I2C bus: VCC/VIN to 3.3V (physical pin 1),
+GND to pin 6, SDA to pin 3, and SCL to pin 5. Enable I2C with `sudo raspi-config`
+and verify the module appears at address `0x68` using `i2cdetect -y 1`. The Pi
+runtime reads `/dev/i2c-1` directly and calibrates the stationary Z-axis gyro
+at startup; keep the robot still during calibration. Mount the board level with
+its Z axis upward. The MPU-6050 cannot independently find north, so configure
+the known starting direction in `config/navigation_waypoints.yaml`.
+
+The ESP32 firmware uses low PWM values (`70/255` forward, `65/255` turn) and
+accepts bounded differential commands from the Pi, capped at `55/255`. Actual
+motor speed and startup behavior depend on the driver, battery, and load; test
+with the wheels raised first.
 
 Update these files before deployment to match your robot hardware and environment.
+
+### Telegram configuration
+
+Keep the bot token out of tracked configuration. Export the credentials in the
+shell or service that starts the robot:
+
+```bash
+export TELEGRAM_BOT_TOKEN='<token from BotFather>'
+export TELEGRAM_CHAT_ID='1099781876'
+python3 run_robot.py
+```
+
+The Telegram modules read these environment variables first. If a token has
+ever been committed or shared, revoke it with BotFather and create a replacement.
 
 ## Raspberry Pi Deployment Notes
 
@@ -110,6 +163,35 @@ For deployment on a Raspberry Pi:
 2. Ensure required serial/GPIO interfaces are available if your hardware uses them.
 3. Run the application from a terminal or configure it as a system service for unattended operation.
 4. If using Telegram alerts, make sure your bot token and chat ID are configured securely.
+
+### GPS UART and autonomous route
+
+For a NEO-6M connected to the Pi's hardware UART, connect GPS TX to GPIO15/RXD
+(physical pin 10), GPS RX to GPIO14/TXD (physical pin 8, optional), and ground
+to a Pi ground pin. Use the module's supported supply voltage, but ensure its TX
+signal is 3.3V-compatible; Raspberry Pi GPIO is not 5V-tolerant. Enable the
+hardware UART and disable the serial login console with `sudo raspi-config`.
+
+Run the diagnostic from the project root:
+
+```bash
+python3 scripts/check_gps.py
+```
+
+The diagnostic listens on `/dev/serial0` at 9600 baud for 15 seconds and reports
+whether it received valid NMEA data and a position fix. Autonomous navigation
+also reads that UART directly. Do not run `scripts/check_gps.py` at the same
+time as the robot binary, because both programs would compete for the GPS
+serial port. A module can transmit valid data without a satellite fix; test
+outdoors and allow time for its first fix.
+
+The supplied trail is disabled by default. After stationary and wheels-raised
+checks, enable it by setting `enabled: 1`, `autonomous_movement: 1`, and
+`mode: "hardware"` in `config/navigation_waypoints.yaml`. Position the robot
+within 4 m of the first waypoint and point it north. Have an operator at the
+physical stop throughout the low-speed test. The drive PWM is capped at 55/255,
+but actual speed depends on the motors and load; GPS cannot prevent collisions
+or guarantee that a waypoint is reached precisely.
 
 ## Optional AI and Vision Features
 

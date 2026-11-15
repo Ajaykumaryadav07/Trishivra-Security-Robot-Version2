@@ -1,5 +1,5 @@
 # python/__init__.py
-from .camera_handler import CameraHandler, list_cameras, create_camera_or_exit
+from .camera_handler import CameraHandler, create_camera_or_exit
 from .alert_rules import should_alert, get_time_period
 from .telegram_bot import start_telegram_bot, run_bot_in_background, run_alert_monitor_in_background
 from .send_telegram_photo import (
@@ -8,9 +8,15 @@ from .send_telegram_photo import (
     send_telegram_alert,
     send_startup_message
 )
-from .robot_state import robot_state
+from .robot_state import (
+    RobotState,
+    robot_state,
+    get_robot_state,
+    get_status_string,
+    update_robot_state_from_monitor,
+)
 from .monitor import SecurityMonitor, monitor_camera, run_monitor_in_background
-from .autonomy import AutonomousGuard, load_waypoints_from_yaml
+from .autonomy import PatrolWaypoint, AutonomousGuard, load_waypoints_from_yaml
 from .voice_controller import voice_speak, voice_listen
 
 from .detection_state import (
@@ -51,7 +57,6 @@ from .detection_state import (
 
 __all__ = [
    'CameraHandler',
-    'list_cameras',
     'create_camera_or_exit',
     'should_alert',
     'get_time_period',
@@ -62,10 +67,12 @@ __all__ = [
     'send_telegram_message',
     'send_telegram_alert',
     'send_startup_message',
+    'RobotState',
     'robot_state',
     'get_robot_state',
     'get_status_string',
     'update_robot_state_from_monitor',
+    'PatrolWaypoint',
     'AutonomousGuard',
     'load_waypoints_from_yaml',
     'SecurityMonitor',

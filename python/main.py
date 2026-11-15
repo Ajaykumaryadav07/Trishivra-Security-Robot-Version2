@@ -38,7 +38,7 @@ def main():
         waypoints = load_waypoints_from_yaml(str(waypoints_file))
 
     guard = AutonomousGuard(waypoints)
-    guard.load_camera(width=640, height=480, fps=6)
+    guard.load_camera(width=640, height=480, fps=10)
 
     # Send startup notification plus one camera snapshot after camera is active
     send_startup_message()

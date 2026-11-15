@@ -40,16 +40,28 @@ inline std::string FLAG_FILE(){ return std::string(FLAG_FILE_PATH); }
 // Camera defaults (optimized)
 constexpr int CAMERA_WIDTH = 640;
 constexpr int CAMERA_HEIGHT = 480;
-constexpr int CAMERA_FPS = 6;
+constexpr int CAMERA_FPS = 10;
 constexpr int FRAME_INTERVAL_MS = 1000 / CAMERA_FPS;  // Pre-calculated
 
 // YOLO defaults (removed duplicates, optimized)
-constexpr std::string_view YOLO_MODEL_PATH = "models/best_openvino_model";
+constexpr std::string_view YOLO_MODEL_PATH = "models/best.onnx";
 constexpr float YOLO_CONFIDENCE_THRESHOLD = 0.5f;
-constexpr int YOLO_IMG_SIZE = 320;
+constexpr int YOLO_IMG_SIZE = 640;
+
+// Fixed parking zone in camera pixels. Adjust these values to the parking area.
+constexpr int PARKING_ROI_X = 0;
+constexpr int PARKING_ROI_Y = 0;
+constexpr int PARKING_ROI_WIDTH = CAMERA_WIDTH;
+constexpr int PARKING_ROI_HEIGHT = CAMERA_HEIGHT;
+constexpr int VEHICLE_MISSING_TIMEOUT_SECONDS = 10;
+
+// Odometry defaults; calibrate these values for the robot hardware.
+constexpr float WHEEL_DIAMETER_CM = 6.5f;
+constexpr float WHEEL_BASE_CM = 15.0f;
+constexpr int ENCODER_PPR = 20;
 
 // Navigation (optimized constants)
-constexpr float WAYPOINT_TOLERANCE = 0.1f;
+constexpr float WAYPOINT_TOLERANCE = 4.0f;  // GPS waypoint radius (meter-level fix)
 constexpr float MAP_WIDTH = 10.0f;      // meters
 constexpr float MAP_HEIGHT = 10.0f;     // meters
 constexpr float MAP_RESOLUTION = 0.1f;  // 0.1m per cell (optimized from 0.05m)

@@ -1,12 +1,10 @@
 #include <Arduino.h>
 
 // ===== PIN DEFINITIONS =====
-#define REAR_PWM   25
-#define REAR_DIR   26
-#define STEER_IN1  12
-#define STEER_IN2  13
-#define STEER_EN   21
-#define STEER_POT  34
+#define LEFT_RPWM  25
+#define LEFT_LPWM  26
+#define RIGHT_RPWM 27
+#define RIGHT_LPWM 13
 
 #define TRIG_F     32
 #define ECHO_F     33
@@ -16,175 +14,227 @@
 #define ECHO_R     14
 
 // ===== PARAMETERS =====
-#define OBSTACLE_DIST_CM  30
-#define SIDE_CLEAR_CM     20
-#define AVOID_TURN_TIME   800
-#define DRIVE_SPEED       200
-
-const int POT_MIN = 200;
-const int POT_MAX = 3800;
-const int STRAIGHT_ANGLE = 90;
-const int TURN_ANGLE = 45;
-
-// PID Parameters
-float Kp = 2.5, Ki = 0.05, Kd = 0.5;
-int integral = 0, last_error = 0;
+#define OBSTACLE_DIST_CM   30
+#define SIDE_CLEAR_CM      20
+#define AVOID_TURN_TIME    800
+#define DRIVE_SPEED        70
+#define TURN_SPEED         65
+#define REMOTE_SPEED_LIMIT 55
+#define US_INTERVAL_MS     30      
+#define US_TIMEOUT_US      25000   
+#define DEBOUNCE_THRESHOLD 2       
+#define COMMAND_TIMEOUT_MS 2000    // Stop if Pi stops sending commands for 2s
 
 // ===== GLOBALS =====
 bool avoiding = false;
 unsigned long avoidStartTime = 0;
-int globalTargetAngle = STRAIGHT_ANGLE;
+unsigned long lastCommandTime = 0; // Timer for Pi connection check
 
 enum RobotMode {
     MODE_IDLE,
     MODE_MANUAL,
+    MODE_REMOTE,
     MODE_AUTO_PATROL
 };
 
 RobotMode robotMode = MODE_IDLE;
 bool isDrivingForward = false;
+bool lastTurnLeft = false;
 
 // Ultrasonic state
 struct USState {
-    unsigned long trigTime;
+    uint8_t trig;
+    uint8_t echo;
+    volatile uint32_t echoStart;
+    volatile uint32_t echoDuration;
+    volatile bool echoDone;
     bool measuring;
+    uint32_t trigTime;
     float lastDistance;
-    bool echoHigh;
-    unsigned long echoStart;
 };
 
-USState usF = {0, false, 400.0, false, 0};
-USState usL = {0, false, 400.0, false, 0};
-USState usR = {0, false, 400.0, false, 0};
+USState usF = {TRIG_F, ECHO_F, 0, 0, false, false, 0, 400.0f};
+USState usL = {TRIG_L, ECHO_L, 0, 0, false, false, 0, 400.0f};
+USState usR = {TRIG_R, ECHO_R, 0, 0, false, false, 0, 400.0f};
+
+USState* const sensors[3] = {&usF, &usL, &usR};
+const uint8_t sensorSequence[4] = {0, 1, 0, 2};   
 
 int frontObstacleCount = 0;
-const int DEBOUNCE_THRESHOLD = 3;
+
+// ===== FUNCTION PROTOTYPES =====
+void parseSerialCommand(const String& commandLine);
+void IRAM_ATTR echoISR(void* arg);
+void triggerUS(USState& s);
+bool updateUS(USState& s);
+bool chooseTurnDirection();
+void checkObstacles();
+void setSideSpeed(int rpwmPin, int lpwmPin, int speed);
+void driveSides(int left, int right);
+void driveForward();
+void driveBackward();
+void performTurnLeft();
+void turnRight();
+void stopMotors();
+void setMode(RobotMode mode);
+void executeCommand(char cmd);
+
+bool parsePwmValue(const String& text, int& value) {
+    if (text.length() == 0 || text.length() > 4) return false;
+    unsigned int firstDigit = text.charAt(0) == '-' ? 1 : 0;
+    if (firstDigit == text.length()) return false;
+    for (unsigned int i = firstDigit; i < text.length(); i++) {
+        if (text.charAt(i) < '0' || text.charAt(i) > '9') return false;
+    }
+
+    long parsed = text.toInt();
+    if (parsed < -255 || parsed > 255) return false;
+    value = static_cast<int>(parsed);
+    return true;
+}
 
 // ===== SETUP =====
 void setup() {
     Serial.begin(115200);
-    
-    pinMode(REAR_DIR, OUTPUT);
-    pinMode(STEER_IN1, OUTPUT);
-    pinMode(STEER_IN2, OUTPUT);
-    
-    ledcSetup(0, 5000, 8);
-    ledcAttachPin(REAR_PWM, 0);
-    ledcSetup(1, 5000, 8);
-    ledcAttachPin(STEER_EN, 1);
-    
-    pinMode(TRIG_F, OUTPUT);
-    pinMode(ECHO_F, INPUT);
-    pinMode(TRIG_L, OUTPUT);
-    pinMode(ECHO_L, INPUT);
-    pinMode(TRIG_R, OUTPUT);
-    pinMode(ECHO_R, INPUT);
-    
-    digitalWrite(TRIG_F, LOW);
-    digitalWrite(TRIG_L, LOW);
-    digitalWrite(TRIG_R, LOW);
-    analogReadResolution(12);
-    
+
+    // ESP32 Arduino Core v3.x LEDC API
+    ledcAttach(LEFT_RPWM, 5000, 8);
+    ledcAttach(LEFT_LPWM, 5000, 8);
+    ledcAttach(RIGHT_RPWM, 5000, 8);
+    ledcAttach(RIGHT_LPWM, 5000, 8);
+
+    for (int i = 0; i < 3; i++) {
+        pinMode(sensors[i]->trig, OUTPUT);
+        pinMode(sensors[i]->echo, INPUT);
+        digitalWrite(sensors[i]->trig, LOW);
+        attachInterruptArg(digitalPinToInterrupt(sensors[i]->echo), echoISR, sensors[i], CHANGE);
+    }
+
     stopMotors();
-    Serial.println("ESP32 Ready");
+    Serial.println("ESP32 Ready - 4WD skid steer with Timeout");
 }
 
 // ===== LOOP =====
-void parseSerialCommand(const String& commandLine);
-
 void loop() {
-    // Ultrasonic reads (non-blocking)
-    static unsigned long lastFrontRead = 0;
-    static unsigned long lastSideRead = 0;
+    static unsigned long lastTrigger = 0;
+    static uint8_t seqIdx = 0;
     static String serialBuffer = "";
-    
+
+    // --- 1. Serial input (from Pi or Laptop) ---
     while (Serial.available()) {
         char c = Serial.read();
         if (c == '\n' || c == '\r') {
             if (serialBuffer.length() > 0) {
                 parseSerialCommand(serialBuffer);
                 serialBuffer = "";
+                lastCommandTime = millis(); // Reset timeout timer on any command
             }
-        } else {
-            if (serialBuffer.length() < 64) {
-                serialBuffer += c;
-            }
+        } else if (serialBuffer.length() < 64) {
+            serialBuffer += c;
         }
     }
-    
-    if (millis() - lastFrontRead >= 50) {
-        initUS(TRIG_F, usF);
-        lastFrontRead = millis();
+
+    // --- 2. Safety Timeout (Pi Watchdog) ---
+    // If Pi goes silent for 2s while driving, stop the robot.
+    if (robotMode != MODE_IDLE && (millis() - lastCommandTime > COMMAND_TIMEOUT_MS)) {
+        if (!avoiding) {
+            stopMotors();
+            robotMode = MODE_IDLE;
+            Serial.println("ERR: PI_TIMEOUT (Stopping motors)");
+        }
     }
-    if (millis() - lastSideRead >= 100) {
-        initUS(TRIG_L, usL);
-        initUS(TRIG_R, usR);
-        lastSideRead = millis();
+
+    // --- 3. Fire ONE ultrasonic sensor at a time ---
+    if (millis() - lastTrigger >= US_INTERVAL_MS) {
+        triggerUS(*sensors[sensorSequence[seqIdx]]);
+        seqIdx = (seqIdx + 1) % 4;
+        lastTrigger = millis();
     }
-    
-    updateUS(ECHO_F, usF);
-    updateUS(ECHO_L, usL);
-    updateUS(ECHO_R, usR);
-    
+
+    // --- 4. Collect ultrasonic results ---
+    bool frontNew = updateUS(usF);
+    updateUS(usL);
+    updateUS(usR);
+
+    if (frontNew) {
+        if (usF.lastDistance < OBSTACLE_DIST_CM) frontObstacleCount++;
+        else frontObstacleCount = 0;
+    }
+
+    // --- 5. Check Obstacles ---
     checkObstacles();
 
-    if (robotMode == MODE_AUTO_PATROL && !avoiding) {
+    // --- 6. Continuous Patrol Logic ---
+    if (robotMode == MODE_AUTO_PATROL && !avoiding && !isDrivingForward) {
         driveForward();
         isDrivingForward = true;
     }
-    
-    updateSteeringPID();
+
     delay(1);
 }
 
 // ===== ULTRASONIC =====
-void initUS(int trig, USState& s) {
-    if (!s.measuring) {
-        digitalWrite(trig, LOW);
-        delayMicroseconds(2);
-        digitalWrite(trig, HIGH);
-        delayMicroseconds(10);
-        digitalWrite(trig, LOW);
-        s.trigTime = micros();
-        s.measuring = true;
-        s.echoHigh = false;
-        s.echoStart = 0;
+void IRAM_ATTR echoISR(void* arg) {
+    USState* s = static_cast<USState*>(arg);
+    if (digitalRead(s->echo)) {
+        s->echoStart = micros();
+    } else {
+        s->echoDuration = micros() - s->echoStart;
+        s->echoDone = true;
     }
 }
 
-bool updateUS(int echo, USState& s) {
+void triggerUS(USState& s) {
+    if (s.measuring) return;
+    s.echoDone = false;
+    digitalWrite(s.trig, LOW);
+    delayMicroseconds(2);
+    digitalWrite(s.trig, HIGH);
+    delayMicroseconds(10);
+    digitalWrite(s.trig, LOW);
+    s.trigTime = micros();
+    s.measuring = true;
+}
+
+bool updateUS(USState& s) {
     if (!s.measuring) return false;
-    
-    int val = digitalRead(echo);
-    unsigned long now = micros();
-    
-    if (val && !s.echoHigh) {
-        s.echoHigh = true;
-        s.echoStart = now;
-        return false;
-    }
-    if (!val && s.echoHigh) {
-        unsigned long duration = now - s.echoStart;
-        s.lastDistance = (duration / 2.0) / 29.1;
+
+    if (s.echoDone) {
+        float d = s.echoDuration / 58.2f;   
+        s.lastDistance = (d > 400.0f) ? 400.0f : d;
         s.measuring = false;
-        s.echoHigh = false;
         return true;
     }
-    if (now - s.trigTime > 23000) {
+    if (micros() - s.trigTime > US_TIMEOUT_US) {
+        s.lastDistance = 400.0f;            
         s.measuring = false;
-        s.echoHigh = false;
-        s.lastDistance = 400.0;
         return true;
     }
     return false;
 }
 
 // ===== OBSTACLE AVOIDANCE =====
+bool chooseTurnDirection() {
+    float leftClear = usL.lastDistance;
+    float rightClear = usR.lastDistance;
+
+    if (leftClear > SIDE_CLEAR_CM && rightClear > SIDE_CLEAR_CM) {
+        if (leftClear > rightClear) return true;
+        if (rightClear > leftClear) return false;
+        return !lastTurnLeft;
+    }
+
+    if (leftClear > SIDE_CLEAR_CM) return true;
+    if (rightClear > SIDE_CLEAR_CM) return false;
+
+    return !lastTurnLeft;
+}
+
 void checkObstacles() {
     if (avoiding) {
         if (millis() - avoidStartTime >= AVOID_TURN_TIME) {
-            globalTargetAngle = STRAIGHT_ANGLE;
             avoiding = false;
+            frontObstacleCount = 0;   
             if (robotMode == MODE_AUTO_PATROL) {
                 driveForward();
                 isDrivingForward = true;
@@ -196,92 +246,58 @@ void checkObstacles() {
         }
         return;
     }
-    
-    if (usF.lastDistance < OBSTACLE_DIST_CM) {
-        frontObstacleCount++;
-    } else {
+
+    // Only react to obstacles while actually driving forward
+    if (robotMode == MODE_IDLE || !isDrivingForward) {
         frontObstacleCount = 0;
+        return;
     }
-    
+
     if (frontObstacleCount >= DEBOUNCE_THRESHOLD) {
         stopMotors();
         frontObstacleCount = 0;
+        isDrivingForward = false;
         Serial.print("OBSTACLE_DETECTED,");
         Serial.print(usF.lastDistance, 1);
         Serial.println("cm");
-        
-        bool turnLeft = (usL.lastDistance > usR.lastDistance && usL.lastDistance > SIDE_CLEAR_CM);
-        if (turnLeft) {
-            globalTargetAngle = STRAIGHT_ANGLE - TURN_ANGLE;
+
+        if (chooseTurnDirection()) {
+            performTurnLeft();
+            lastTurnLeft = true;
             Serial.println("TURNING_LEFT");
         } else {
-            globalTargetAngle = STRAIGHT_ANGLE + TURN_ANGLE;
+            turnRight();
+            lastTurnLeft = false;
             Serial.println("TURNING_RIGHT");
         }
-        
-        driveForward();
+
         avoiding = true;
         avoidStartTime = millis();
     }
 }
 
-// ===== STEERING PID =====
-void updateSteeringPID() {
-    int current = potToAngle(analogRead(STEER_POT));
-    int error = globalTargetAngle - current;
-    
-    if (abs(error) <= 2) {
-        setSteering(0, 0);
-        integral = 0;
-        return;
-    }
-    
-    integral = constrain(integral + error, -1000, 1000);
-    int derivative = error - last_error;
-    last_error = error;
-    
-    float output = Kp * error + Ki * integral + Kd * derivative;
-    int speed = constrain(abs(output), 0, 255);
-    
-    if (error > 0) setSteering(speed, 0);
-    else setSteering(0, speed);
-}
-
-int potToAngle(int val) {
-    val = constrain(val, POT_MIN, POT_MAX);
-    return map(val, POT_MIN, POT_MAX, 0, 180);
-}
-
-void setSteering(int r, int l) {
-    if (r > 0) {
-        digitalWrite(STEER_IN1, HIGH);
-        digitalWrite(STEER_IN2, LOW);
-        ledcWrite(1, r);
-    } else if (l > 0) {
-        digitalWrite(STEER_IN1, LOW);
-        digitalWrite(STEER_IN2, HIGH);
-        ledcWrite(1, l);
+// ===== 4WD MOTOR DRIVE =====
+void setSideSpeed(int rpwmPin, int lpwmPin, int speed) {
+    speed = constrain(speed, -255, 255);
+    if (speed >= 0) {
+        ledcWrite(rpwmPin, speed);
+        ledcWrite(lpwmPin, 0);
     } else {
-        digitalWrite(STEER_IN1, LOW);
-        digitalWrite(STEER_IN2, LOW);
-        ledcWrite(1, 0);
+        ledcWrite(rpwmPin, 0);
+        ledcWrite(lpwmPin, -speed);
     }
 }
 
-// ===== MOTOR =====
-void driveForward() {
-    digitalWrite(REAR_DIR, HIGH);
-    ledcWrite(0, DRIVE_SPEED);
+void driveSides(int left, int right) {
+    setSideSpeed(LEFT_RPWM, LEFT_LPWM, left);
+    setSideSpeed(RIGHT_RPWM, RIGHT_LPWM, right);
 }
 
-void driveBackward() {
-    digitalWrite(REAR_DIR, LOW);
-    ledcWrite(0, DRIVE_SPEED);
-}
-
-void stopMotors() {
-    ledcWrite(0, 0);
-}
+void driveForward()   { driveSides(DRIVE_SPEED, DRIVE_SPEED); }
+void driveBackward()  { driveSides(-DRIVE_SPEED, -DRIVE_SPEED); }
+void performTurnLeft(){ driveSides(-TURN_SPEED, TURN_SPEED); }
+void turnRight()      { driveSides(TURN_SPEED, -TURN_SPEED); }
+void stopMotors()     { driveSides(0, 0); }
 
 // ===== COMMANDS =====
 void setMode(RobotMode mode) {
@@ -289,58 +305,67 @@ void setMode(RobotMode mode) {
     robotMode = mode;
     switch (mode) {
         case MODE_IDLE:
+            avoiding = false;
             stopMotors();
             isDrivingForward = false;
             Serial.println("MODE_IDLE");
             break;
         case MODE_MANUAL:
             isDrivingForward = false;
+            if (!avoiding) stopMotors();
             Serial.println("MODE_MANUAL");
+            break;
+        case MODE_REMOTE:
+            isDrivingForward = false;
+            if (!avoiding) stopMotors();
+            Serial.println("MODE_REMOTE");
             break;
         case MODE_AUTO_PATROL:
             Serial.println("MODE_AUTO_PATROL");
-            driveForward();
-            isDrivingForward = true;
+            if (!avoiding) {              
+                driveForward();
+                isDrivingForward = true;
+            }
             break;
     }
 }
 
 void executeCommand(char cmd) {
-    if (avoiding && cmd != 'S' && cmd != 'P' && cmd != 'M') return;
-    
+    if (avoiding && cmd != 'S' && cmd != 'P' && cmd != 'M') {
+        Serial.println("BUSY_AVOIDING");
+        return;
+    }
+
     switch (cmd) {
         case 'F':
             setMode(MODE_MANUAL);
-            globalTargetAngle = STRAIGHT_ANGLE;
             driveForward();
             isDrivingForward = true;
             Serial.println("CMD_FORWARD");
             break;
         case 'B':
             setMode(MODE_MANUAL);
-            globalTargetAngle = STRAIGHT_ANGLE;
             driveBackward();
             isDrivingForward = false;
             Serial.println("CMD_BACKWARD");
             break;
         case 'L':
             setMode(MODE_MANUAL);
-            globalTargetAngle = STRAIGHT_ANGLE - TURN_ANGLE;
-            driveForward();
-            isDrivingForward = true;
+            performTurnLeft();
+            isDrivingForward = false;
             Serial.println("CMD_LEFT_TURN");
             break;
         case 'R':
             setMode(MODE_MANUAL);
-            globalTargetAngle = STRAIGHT_ANGLE + TURN_ANGLE;
-            driveForward();
-            isDrivingForward = true;
+            turnRight();
+            isDrivingForward = false;
             Serial.println("CMD_RIGHT_TURN");
             break;
         case 'S':
+            avoiding = false;             
             setMode(MODE_IDLE);
-            globalTargetAngle = STRAIGHT_ANGLE;
             stopMotors();
+            isDrivingForward = false;
             Serial.println("CMD_STOP");
             break;
         case 'P':
@@ -349,13 +374,9 @@ void executeCommand(char cmd) {
         case 'M':
             setMode(MODE_MANUAL);
             break;
-        case 'C':
-            if (Serial.available()) {
-                int angle = Serial.parseInt();
-                globalTargetAngle = constrain(angle, 0, 180);
-                Serial.print("ANGLE_SET,");
-                Serial.println(angle);
-            }
+        default:
+            Serial.print("UNKNOWN_COMMAND,");
+            Serial.println(cmd);
             break;
     }
 }
@@ -365,20 +386,47 @@ void parseSerialCommand(const String& commandLine) {
     cmd.trim();
     if (cmd.length() == 0) return;
 
+    if (cmd.startsWith("G,")) {
+        const int comma = cmd.indexOf(',', 2);
+        int left = 0;
+        int right = 0;
+        if (comma < 0 ||
+            cmd.indexOf(',', comma + 1) >= 0 ||
+            !parsePwmValue(cmd.substring(2, comma), left) ||
+            !parsePwmValue(cmd.substring(comma + 1), right)) {
+            Serial.println("ERR: INVALID_SPEED_COMMAND");
+            setMode(MODE_IDLE);
+            return;
+        }
+        if (avoiding) {
+            Serial.println("BUSY_AVOIDING");
+            return;
+        }
+
+        left = constrain(left, -REMOTE_SPEED_LIMIT, REMOTE_SPEED_LIMIT);
+        right = constrain(right, -REMOTE_SPEED_LIMIT, REMOTE_SPEED_LIMIT);
+        setMode(MODE_REMOTE);
+        driveSides(left, right);
+        isDrivingForward = left + right > 0;
+        Serial.println("CMD_SPEED");
+        return;
+    }
+
     if (cmd.equalsIgnoreCase("PATROL") || cmd.equalsIgnoreCase("AUTO") || cmd.equalsIgnoreCase("P")) {
-        setMode(MODE_AUTO_PATROL);
+        executeCommand('P');
         return;
     }
     if (cmd.equalsIgnoreCase("STOP") || cmd.equalsIgnoreCase("PAUSE") || cmd.equalsIgnoreCase("S")) {
         executeCommand('S');
         return;
     }
-    if (cmd.equalsIgnoreCase("RESUME") || cmd.equalsIgnoreCase("START") || cmd.equalsIgnoreCase("F") || cmd.equalsIgnoreCase("FORWARD")) {
+    if (cmd.equalsIgnoreCase("RESUME") || cmd.equalsIgnoreCase("START") ||
+        cmd.equalsIgnoreCase("F") || cmd.equalsIgnoreCase("FORWARD")) {
         executeCommand('F');
         return;
     }
     if (cmd.equalsIgnoreCase("MANUAL") || cmd.equalsIgnoreCase("M")) {
-        setMode(MODE_MANUAL);
+        executeCommand('M');
         return;
     }
     if (cmd.equalsIgnoreCase("LEFT") || cmd.equalsIgnoreCase("L")) {
@@ -393,16 +441,8 @@ void parseSerialCommand(const String& commandLine) {
         executeCommand('B');
         return;
     }
-    if (cmd.startsWith("ANGLE ")) {
-        int angle = cmd.substring(6).toInt();
-        angle = constrain(angle, 0, 180);
-        globalTargetAngle = angle;
-        Serial.print("ANGLE_SET,");
-        Serial.println(angle);
-        return;
-    }
     if (cmd.length() == 1) {
-        executeCommand(cmd.charAt(0));
+        executeCommand(toupper(cmd.charAt(0)));
         return;
     }
     Serial.print("UNKNOWN_COMMAND,");

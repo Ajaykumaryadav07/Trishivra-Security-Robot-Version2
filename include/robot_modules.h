@@ -28,9 +28,7 @@ struct VelocityCmd {
 // ===== CAMERA MODULE =====
 enum class CameraType {
     UNKNOWN,
-    PI_CAMERA,
-    USB_CAMERA,
-    V4L2_DEVICE
+    PI_CAMERA
 };
 
 class CameraModule {
@@ -69,8 +67,6 @@ private:
     
     // Camera detection methods
     bool detect_pi_camera();
-    bool detect_usb_camera(int start_index = 0);
-    CameraType identify_camera_type(int index);
     
     // Night vision helper methods
     void detect_brightness(const cv::Mat& frame);
@@ -90,6 +86,7 @@ public:
     ~MotorController();
     bool init(const std::string& port = "/dev/ttyUSB0", int baud = 115200);
     void set_speed(float left, float right);  // -1.0 to 1.0
+    void set_gps_motion(float linear, float angular);
     void stop();
     void send_command(char cmd);
     void set_steering_angle(int angle);  // 0-180
@@ -149,6 +146,7 @@ public:
     void clear_path();
     void set_map(const cv::Mat& map);
     bool is_goal_reached() const;
+    bool is_route_complete() const { return route_complete; }
     int get_current_waypoint_index() const { return current_waypoint_index; }
     
 private:
@@ -158,10 +156,20 @@ private:
     Pose goal;
     cv::Mat map;
     std::vector<Pose> path;
+    bool route_complete = true;
     
     std::vector<Pose> a_star(const Pose& start, const Pose& goal);
     float normalize_angle(float angle);
 };
+
+bool load_navigation_waypoints(const std::string& path,
+                               std::vector<Pose>& waypoints,
+                               std::string& mode,
+                               bool& autonomous_movement,
+                               bool& require_gps,
+                               double& initial_heading_deg,
+                               double& origin_latitude,
+                               double& origin_longitude);
 
 // ===== DEPTH ESTIMATOR =====
 class DepthEstimator {

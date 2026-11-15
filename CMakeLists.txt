@@ -55,6 +55,9 @@ set(SOURCES
     src/slam.cpp
     src/steering_controller.cpp
     src/odometry.cpp
+    src/imu_mpu6050.cpp
+    src/gps_receiver.cpp
+    src/voice_controller.cpp
     src/utils.cpp
 )
 

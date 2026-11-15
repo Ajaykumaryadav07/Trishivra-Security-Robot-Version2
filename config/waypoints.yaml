@@ -1,7 +1,52 @@
 waypoints:
-  - name: entry
-    action: F
-    duration: 2.0
-  - name: checkpoint
-    action: R
-    duration: 1.0
+  - action: "F"
+    duration: 8.0
+    name: "BBD Temple → Main Gate"
+  - action: "L"
+    duration: 1.5
+    name: "Turn left towards Faizabad Road"
+  - action: "F"
+    duration: 12.0
+    name: "Along Faizabad Road to Stadium"
+  - action: "R"
+    duration: 1.5
+    name: "Turn right into Stadium gate"
+  - action: "F"
+    duration: 6.0
+    name: "Cross Stadium parking"
+  - action: "L"
+    duration: 1.5
+    name: "Turn left towards Bank"
+  - action: "F"
+    duration: 5.0
+    name: "Punjab National Bank arrival"
+  - action: "S"
+    duration: 3.0
+    name: "Stop – scan area"
+  - action: "L"
+    duration: 1.5
+    name: "Turn left (start return)"
+  - action: "F"
+    duration: 5.0
+    name: "Back from Bank"
+  - action: "R"
+    duration: 1.5
+    name: "Turn right towards Stadium"
+  - action: "F"
+    duration: 6.0
+    name: "Cross Stadium parking"
+  - action: "L"
+    duration: 1.5
+    name: "Turn left towards Faizabad Road"
+  - action: "F"
+    duration: 12.0
+    name: "Back along Faizabad Road"
+  - action: "R"
+    duration: 1.5
+    name: "Turn right to main gate"
+  - action: "F"
+    duration: 8.0
+    name: "Back to BBD Temple"
+  - action: "S"
+    duration: 5.0
+    name: "Patrol complete – stop"

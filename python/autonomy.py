@@ -59,7 +59,7 @@ class AutonomousGuard:
             robot_state.current_location = self.current_goal.name
             robot_state.write_status()
 
-    def load_camera(self, width: int = 320, height: int = 240, fps: int = 6):
+    def load_camera(self, width: int = 320, height: int = 240, fps: int = 10):
         self.camera = CameraHandler(camera_type='auto', width=width, height=height, fps=fps)
         return self.camera
 
@@ -271,13 +271,23 @@ def load_waypoints_from_yaml(path: str) -> List[PatrolWaypoint]:
 
     try:
         with open(path, 'r', encoding='utf-8') as f:
-            data = yaml.safe_load(f)
+            data = yaml.safe_load(f) or {}
     except Exception as e:
         logger.error('Failed to load waypoints: %s', e)
         return []
 
+    if isinstance(data, dict):
+        entries = data.get('waypoints', data.get('routes', []))
+    else:
+        entries = data
+
+    if not isinstance(entries, list):
+        return []
+
     items = []
-    for entry in data.get('waypoints', []):
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
         items.append(PatrolWaypoint(
             name=entry.get('name', 'unknown'),
             action=entry.get('action', 'F'),

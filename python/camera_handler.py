@@ -3,9 +3,9 @@ Camera Handler for Security Robot V2
 
 Supports:
 - Raspberry Pi Camera Module 2 (NoIR)
-- USB Webcams
-- Auto-detection with fallback
-- 6 FPS (configurable)
+- Raspberry Pi camera only
+- Pi camera detection
+- 10 FPS (configurable)
 - OpenCV compatibility
 """
 
@@ -15,7 +15,6 @@ try:
 except Exception:
     cv2 = None
     CV2_AVAILABLE = False
-import os
 import time
 import logging
 from typing import Tuple, Optional
@@ -31,120 +30,56 @@ try:
     PI_CAMERA_AVAILABLE = True
 except ImportError:
     PI_CAMERA_AVAILABLE = False
-    logger.warning("⚠️ picamera2 not available - using USB camera only")
+    logger.warning("⚠️ picamera2 not available - Pi Camera support disabled")
 
 
 class CameraHandler:
     """
-    Unified camera interface for Pi Camera Module and USB webcams.
-    Auto-detects available camera and provides unified interface.
-    Optimized for 6 FPS on Raspberry Pi.
+    Camera interface for the Raspberry Pi camera.
+    Configured for 10 FPS on Raspberry Pi by default.
     """
     
     def __init__(self, 
                  camera_type: str = "auto",
                  width: int = 640,
                  height: int = 480,
-                 fps: int = 6):
+                 fps: int = 10):
         """
         Initialize camera handler.
         
         Args:
-            camera_type: "pi_camera", "usb", or "auto" (auto-detect)
+            camera_type: "pi_camera" or "auto" (Pi camera only)
             width: Frame width (default: 640)
             height: Frame height (default: 480)
-            fps: Frames per second (default: 6)
+            fps: Frames per second (default: 10)
         """
         self.width = width
         self.height = height
         self.fps = fps
         self.camera_type = None
         self.pi_camera = None
-        self.usb_camera = None
         self.is_initialized = False
         self.lock = Lock()
         
         self._init_camera(camera_type)
     
     def _init_camera(self, camera_type: str):
-        """Initialize appropriate camera type."""
-        
-        if camera_type == "auto":
-            # Try Pi Camera first
-            if PI_CAMERA_AVAILABLE:
-                try:
-                    logger.info("🎥 Attempting Pi Camera initialization...")
-                    self.pi_camera = Picamera2()
-                    self.camera_type = "pi_camera"
-                    self._setup_pi_camera()
-                    self.is_initialized = True
-                    logger.info("✅ Pi Camera Module connected")
-                    return
-                except Exception as e:
-                    logger.warning(f"⚠️ Pi Camera failed: {e}")
-                    self.pi_camera = None
+        """Initialize the Raspberry Pi camera."""
+        if self.fps <= 0:
+            raise ValueError("Camera FPS must be greater than zero")
+        if camera_type not in ("auto", "pi_camera"):
+            raise ValueError(f"Unsupported camera type: {camera_type}. Use 'pi_camera' or 'auto'.")
+        if not PI_CAMERA_AVAILABLE:
+            raise RuntimeError("❌ picamera2 not installed")
+        if not CV2_AVAILABLE:
+            raise RuntimeError("❌ OpenCV (cv2) is required to process Pi Camera frames")
 
-            # Fallback to USB camera
-            if not CV2_AVAILABLE:
-                logger.warning("⚠️ OpenCV (cv2) not available — skipping USB camera initialization")
-                raise RuntimeError("❌ No camera found (Pi Camera not available and OpenCV missing)")
-
-            logger.info("🎥 Attempting USB camera initialization...")
-            usb_indexes = [int(os.getenv("USB_CAMERA_INDEX", "0"))]
-            if usb_indexes[0] != 0:
-                usb_indexes.append(0)
-            else:
-                usb_indexes.extend([1, 2, 3])
-
-            for idx in usb_indexes:
-                try:
-                    self.usb_camera = cv2.VideoCapture(idx)
-                except Exception as e:
-                    logger.warning(f"⚠️ Failed to open USB camera index {idx}: {e}")
-                    self.usb_camera = None
-                    continue
-
-                if self.usb_camera and self.usb_camera.isOpened():
-                    self.camera_type = "usb"
-                    self._setup_usb_camera()
-                    self.is_initialized = True
-                    logger.info(f"✅ USB Webcam connected at index {idx}")
-                    return
-                try:
-                    if self.usb_camera:
-                        self.usb_camera.release()
-                except Exception:
-                    pass
-
-            raise RuntimeError("❌ No camera found (Pi Camera or USB)")
-        
-        elif camera_type == "pi_camera":
-            if not PI_CAMERA_AVAILABLE:
-                raise RuntimeError("❌ picamera2 not installed")
-            self.pi_camera = Picamera2()
-            self.camera_type = "pi_camera"
-            self._setup_pi_camera()
-            self.is_initialized = True
-            logger.info("✅ Pi Camera Module connected")
-        
-        elif camera_type == "usb":
-            usb_indexes = [int(os.getenv("USB_CAMERA_INDEX", "0"))]
-            if usb_indexes[0] != 0:
-                usb_indexes.append(0)
-            else:
-                usb_indexes.extend([1, 2, 3])
-
-            for idx in usb_indexes:
-                self.usb_camera = cv2.VideoCapture(idx)
-                if self.usb_camera.isOpened():
-                    self.camera_type = "usb"
-                    self._setup_usb_camera()
-                    self.is_initialized = True
-                    logger.info(f"✅ USB Webcam connected at index {idx}")
-                    return
-                self.usb_camera.release()
-
-            raise RuntimeError("❌ USB camera not found")
+        logger.info("🎥 Attempting Pi Camera initialization...")
+        self.pi_camera = Picamera2()
+        self.camera_type = "pi_camera"
+        self._setup_pi_camera()
+        self.is_initialized = True
+        logger.info("✅ Pi Camera Module connected")
     
     def _setup_pi_camera(self):
         """Configure Pi Camera Module."""
@@ -152,30 +87,14 @@ class CameraHandler:
             return
         
         config = self.pi_camera.create_preview_configuration(
-            main={"format": "RGB888", "size": (self.width, self.height)}
+            main={"format": "RGB888", "size": (self.width, self.height)},
+            controls={"FrameDurationLimits": (1_000_000 // self.fps,
+                                               1_000_000 // self.fps)}
         )
         self.pi_camera.configure(config)
         self.pi_camera.start()
         
         # Allow camera to warm up
-        time.sleep(0.5)
-    
-    def _setup_usb_camera(self):
-        """Configure USB camera."""
-        if self.usb_camera is None:
-            return
-
-        if not CV2_AVAILABLE:
-            return
-
-        try:
-            self.usb_camera.set(cv2.CAP_PROP_FRAME_WIDTH, self.width)
-            self.usb_camera.set(cv2.CAP_PROP_FRAME_HEIGHT, self.height)
-            self.usb_camera.set(cv2.CAP_PROP_FPS, self.fps)
-        except Exception as e:
-            logger.warning(f"⚠️ Could not configure USB camera properties: {e}")
-
-        # Let camera adjust
         time.sleep(0.5)
     
     def read(self) -> Tuple[bool, Optional[object]]:
@@ -197,20 +116,6 @@ class CameraHandler:
                     # Convert RGB to BGR for OpenCV compatibility
                     frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
                     return True, frame
-                
-                elif self.camera_type == "usb" and self.usb_camera:
-                    if not CV2_AVAILABLE:
-                        return False, None
-
-                    try:
-                        ret, frame = self.usb_camera.read()
-                        if ret and frame is not None:
-                            return True, frame
-                        return False, None
-                    except Exception as e:
-                        logger.error(f"❌ USB camera read error: {e}")
-                        return False, None
-                
                 else:
                     return False, None
                     
@@ -226,11 +131,6 @@ class CameraHandler:
                 self.pi_camera = None
                 logger.info("📷 Pi Camera released")
             
-            if self.usb_camera:
-                self.usb_camera.release()
-                self.usb_camera = None
-                logger.info("📷 USB Camera released")
-            
             self.is_initialized = False
             
         except Exception as e:
@@ -243,7 +143,7 @@ class CameraHandler:
             "width": self.width,
             "height": self.height,
             "fps": self.fps,
-            "model": "Pi Camera Module" if self.camera_type == "pi_camera" else "USB Webcam",
+            "model": "Pi Camera Module",
             "initialized": self.is_initialized
         }
     
@@ -275,26 +175,7 @@ class CameraHandler:
 # Helper Functions
 # ============================================================
 
-def list_cameras(max_index: int = 5) -> list:
-    """
-    List all available camera devices.
-    
-    Args:
-        max_index: Maximum camera index to check
-    
-    Returns:
-        List of available camera indices
-    """
-    available = []
-    for i in range(max_index):
-        cap = cv2.VideoCapture(i)
-        if cap.isOpened():
-            available.append(i)
-            cap.release()
-    return available
-
-
-def create_camera_or_exit(width: int = 640, height: int = 480, fps: int = 6):
+def create_camera_or_exit(width: int = 640, height: int = 480, fps: int = 10):
     """
     Create camera handler with error handling.
     Exits if no camera found.
@@ -324,7 +205,7 @@ if __name__ == "__main__":
         camera_type="auto",
         width=640,
         height=480,
-        fps=6
+        fps=10
     )
     
     print(f"Camera Info: {camera.get_camera_info()}")

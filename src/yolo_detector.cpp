@@ -10,24 +10,20 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdlib>
+#include <filesystem>
 
 // ============================================================
 // YOLODetector Implementation
 // ============================================================
 
 YOLODetector::YOLODetector()
-    : model(nullptr),
-      confidence_threshold(YOLO_CONFIDENCE_THRESHOLD),
+    : confidence_threshold(YOLO_CONFIDENCE_THRESHOLD),
       img_size(YOLO_IMG_SIZE),
       initialized(false) {
     std::cout << "[YOLO] Detector created" << std::endl;
 }
 
 YOLODetector::~YOLODetector() {
-    if (model) {
-        // Cleanup model resources
-        model = nullptr;
-    }
     std::cout << "[YOLO] Detector destroyed" << std::endl;
 }
 
@@ -37,42 +33,25 @@ YOLODetector::~YOLODetector() {
 
 bool YOLODetector::init(const std::string& model_path, float threshold) {
     confidence_threshold = threshold;
-    
+
     try {
-        // In production, use OpenVINO or ONNX Runtime:
-        // 
-        // OpenVINO:
-        // ov::Core core;
-        // ov::CompiledModel compiled_model = core.compile_model(model_path, "CPU");
-        // model = new ov::CompiledModel(compiled_model);
-        //
-        // OR ONNX Runtime:
-        // Ort::SessionOptions session_options;
-        // session_options.SetIntraOpNumThreads(2);
-        // Ort::Session session(env, model_path.c_str(), session_options);
-        // model = new Ort::Session(std::move(session));
-        
-        // For simulation, we'll just check if file exists
-        std::ifstream file(model_path);
-        if (!file.good()) {
-            std::cerr << "[YOLO] Model file not found: " << model_path << std::endl;
-            // Create a dummy model for simulation
-            model = reinterpret_cast<void*>(1);
-            initialized = true;
-            std::cout << "[YOLO] Dummy model loaded (simulation mode)" << std::endl;
-            return true;
+        std::filesystem::path model_file(model_path);
+        if (!std::filesystem::exists(model_file)) {
+            std::cerr << "[YOLO] ONNX model not found: " << model_file << std::endl;
+            return false;
         }
-        
-        // In production, load the actual model here
-        model = reinterpret_cast<void*>(1);
+        model = cv::dnn::readNet(model_file.string());
+        model.setPreferableBackend(cv::dnn::DNN_BACKEND_OPENCV);
+        model.setPreferableTarget(cv::dnn::DNN_TARGET_CPU);
+        std::ifstream labels(model_file.parent_path() / "best.names");
+        std::string label;
+        while (std::getline(labels, label)) if (!label.empty()) class_names.push_back(label);
+        if (class_names.empty()) class_names = {"person", "weapon", "vehicle", "fire"};
         initialized = true;
-        
-        std::cout << "[YOLO] Model loaded: " << model_path << std::endl;
+        std::cout << "[YOLO] ONNX model loaded: " << model_file << std::endl;
         std::cout << "[YOLO] Confidence threshold: " << threshold << std::endl;
         std::cout << "[YOLO] Image size: " << img_size << "x" << img_size << std::endl;
-        
         return true;
-        
     } catch (const std::exception& e) {
         std::cerr << "[YOLO] Init error: " << e.what() << std::endl;
         return false;
@@ -85,82 +64,54 @@ bool YOLODetector::init(const std::string& model_path, float threshold) {
 
 std::vector<Detection> YOLODetector::detect(const cv::Mat& frame) {
     std::vector<Detection> detections;
-    
     if (!initialized || frame.empty()) {
         return detections;
     }
-    
-    // In production, this would run actual inference:
-    // 
-    // 1. Preprocess: resize, normalize, convert to blob
-    // 2. Run inference
-    // 3. Postprocess: decode boxes, NMS, filter by confidence
-    
-    // For simulation, we'll simulate detections
-    static int frame_count = 0;
-    frame_count++;
-    
-    // Simulate detection every 10 frames (to simulate real detection)
-    if (frame_count % 10 != 0) {
-        return detections;
+
+    cv::Mat blob = cv::dnn::blobFromImage(frame, 1.0 / 255.0,
+        cv::Size(img_size, img_size), cv::Scalar(), true, false, CV_32F);
+    model.setInput(blob);
+    std::vector<cv::Mat> outputs;
+    model.forward(outputs, model.getUnconnectedOutLayersNames());
+    if (outputs.empty()) return detections;
+
+    cv::Mat output = outputs[0];
+    const int feature_count = output.size[1];
+    const int candidate_count = output.size[2];
+    const float x_scale = static_cast<float>(frame.cols) / img_size;
+    const float y_scale = static_cast<float>(frame.rows) / img_size;
+    std::vector<cv::Rect> boxes;
+    std::vector<float> scores;
+    std::vector<int> class_ids;
+    for (int candidate = 0; candidate < candidate_count; ++candidate) {
+        float best_score = 0.0f;
+        int best_class = -1;
+        for (int class_id = 0; class_id < feature_count - 4; ++class_id) {
+            float score = output.at<float>(0, class_id + 4, candidate);
+            if (score > best_score) { best_score = score; best_class = class_id; }
+        }
+        if (best_score < confidence_threshold) continue;
+        float cx = output.at<float>(0, 0, candidate);
+        float cy = output.at<float>(0, 1, candidate);
+        float width = output.at<float>(0, 2, candidate);
+        float height = output.at<float>(0, 3, candidate);
+        cv::Rect box(static_cast<int>((cx - width / 2.0f) * x_scale),
+                     static_cast<int>((cy - height / 2.0f) * y_scale),
+                     static_cast<int>(width * x_scale), static_cast<int>(height * y_scale));
+        boxes.push_back(box & cv::Rect(0, 0, frame.cols, frame.rows));
+        scores.push_back(best_score);
+        class_ids.push_back(best_class);
     }
-    
-    // Simulate random detections
-    float rand_val = static_cast<float>(rand()) / RAND_MAX;
-    
-    // Simulate person detection (60% chance)
-    if (rand_val > 0.4f) {
-        Detection det;
-        det.class_name = "person";
-        det.confidence = 0.65f + static_cast<float>(rand()) / RAND_MAX * 0.30f;
-        
-        // Random bounding box (within frame)
-        int x = 50 + static_cast<int>(static_cast<float>(rand()) / RAND_MAX * (frame.cols - 150));
-        int y = 50 + static_cast<int>(static_cast<float>(rand()) / RAND_MAX * (frame.rows - 200));
-        int w = 40 + static_cast<int>(static_cast<float>(rand()) / RAND_MAX * 80);
-        int h = 60 + static_cast<int>(static_cast<float>(rand()) / RAND_MAX * 120);
-        
-        det.bbox = cv::Rect(x, y, w, h);
-        detections.push_back(det);
-        
-        // std::cout << "[YOLO] Detected person at (" << x << ", " << y << ")" << std::endl;
+    std::vector<int> kept;
+    cv::dnn::NMSBoxes(boxes, scores, confidence_threshold, 0.45f, kept);
+    for (int index : kept) {
+        Detection detection;
+        detection.class_name = class_ids[index] < static_cast<int>(class_names.size())
+            ? class_names[class_ids[index]] : std::to_string(class_ids[index]);
+        detection.confidence = scores[index];
+        detection.bbox = boxes[index];
+        detections.push_back(detection);
     }
-    
-    // Simulate weapon detection (20% chance if person detected)
-    if (rand_val > 0.7f && !detections.empty()) {
-        Detection det;
-        det.class_name = "weapon";
-        det.confidence = 0.55f + static_cast<float>(rand()) / RAND_MAX * 0.30f;
-        
-        // Bounding box near person
-        int x = detections[0].bbox.x + 20 + static_cast<int>(static_cast<float>(rand()) / RAND_MAX * 30);
-        int y = detections[0].bbox.y + 30 + static_cast<int>(static_cast<float>(rand()) / RAND_MAX * 30);
-        int w = 20 + static_cast<int>(static_cast<float>(rand()) / RAND_MAX * 30);
-        int h = 10 + static_cast<int>(static_cast<float>(rand()) / RAND_MAX * 20);
-        
-        det.bbox = cv::Rect(x, y, w, h);
-        detections.push_back(det);
-        
-        // std::cout << "[YOLO] WEAPON detected!" << std::endl;
-    }
-    
-    // Simulate fire detection (10% chance)
-    if (rand_val > 0.9f) {
-        Detection det;
-        det.class_name = "fire";
-        det.confidence = 0.60f + static_cast<float>(rand()) / RAND_MAX * 0.25f;
-        
-        int x = 100 + static_cast<int>(static_cast<float>(rand()) / RAND_MAX * (frame.cols - 200));
-        int y = 100 + static_cast<int>(static_cast<float>(rand()) / RAND_MAX * (frame.rows - 200));
-        int w = 30 + static_cast<int>(static_cast<float>(rand()) / RAND_MAX * 50);
-        int h = 30 + static_cast<int>(static_cast<float>(rand()) / RAND_MAX * 50);
-        
-        det.bbox = cv::Rect(x, y, w, h);
-        detections.push_back(det);
-        
-        // std::cout << "[YOLO] FIRE detected!" << std::endl;
-    }
-    
     return detections;
 }
 

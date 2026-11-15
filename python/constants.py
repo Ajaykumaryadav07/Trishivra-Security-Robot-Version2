@@ -25,7 +25,11 @@ FLAG_FILE = str(TMP_DIR / "alert_flag.txt")
 
 # Config files inside project
 CONFIG_FILE = PROJECT_ROOT / "config" / "robot_settings.json"
-WAYPOINTS_FILE = PROJECT_ROOT / "config" / "waypoints.json"
+WAYPOINTS_FILE = PROJECT_ROOT / "config" / "waypoints.yaml"
+LEGACY_WAYPOINTS_FILE = PROJECT_ROOT / "config" / "waypoints.json"
+
+if not WAYPOINTS_FILE.exists() and LEGACY_WAYPOINTS_FILE.exists():
+    WAYPOINTS_FILE = LEGACY_WAYPOINTS_FILE
 
 
 def ensure_tmp_dir_exists() -> None:

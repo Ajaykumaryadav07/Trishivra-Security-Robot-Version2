@@ -5,30 +5,25 @@ import os
 
 def test_send_photo_with_mocked_bot(monkeypatch, tmp_path):
     mod = importlib.reload(__import__('python.telegram_bot', fromlist=['*']))
+    sender = __import__('python.send_telegram_photo', fromlist=['*'])
 
     # Create a dummy photo file
     photo = tmp_path / 'p.jpg'
     photo.write_bytes(b'JPEG')
 
-    # Fake Bot class
     sent = {}
 
-    class FakeBot:
-        def __init__(self, token):
-            self.token = token
+    def fake_send_photo(path, caption):
+        sent['path'] = path
+        sent['caption'] = caption
+        return True
 
-        def send_photo(self, chat_id, photo, caption=None):
-            sent['chat_id'] = chat_id
-            sent['caption'] = caption
-
-    monkeypatch.setattr(mod, 'TELEGRAM_AVAILABLE', True, raising=False)
-    monkeypatch.setattr(mod, 'Bot', FakeBot, raising=False)
-    monkeypatch.setattr(mod, 'BOT_TOKEN', 'fake-token', raising=False)
-    monkeypatch.setattr(mod, 'CHAT_ID', '12345', raising=False)
+    monkeypatch.setattr(sender, 'send_telegram_photo', fake_send_photo)
 
     ok = mod.send_telegram_photo(str(photo), caption='hello')
     assert ok is True
-    assert sent.get('chat_id') == '12345'
+    assert sent.get('path') == str(photo)
+    assert sent.get('caption') == 'hello'
 
 
 def test_capture_photo_uses_camerahandler(monkeypatch, tmp_path):

@@ -30,6 +30,7 @@ from typing import Optional, Dict, Any
 from python.constants import STATUS_FILE, COMMAND_FILE, ALERT_FILE
 from python.detection_state import read_detection_state, write_command
 from python.qa_system import get_answer, get_random_greeting, add_question
+from .camera_handler import CameraHandler
 
 
 try:
@@ -174,14 +175,13 @@ def send_command_to_robot(command: str, value: str = ""):
 def capture_photo(save_path: Optional[str] = None) -> Optional[str]:
     """Capture photo from camera."""
     try:
-        from .camera_handler import CameraHandler
         import cv2
         import tempfile
 
         if save_path is None:
             save_path = os.path.join(tempfile.gettempdir(), "telegram_photo.jpg")
 
-        camera = CameraHandler(fps=6)
+        camera = CameraHandler(fps=10)
         ret, frame = camera.read()
         camera.release()
         
@@ -202,38 +202,12 @@ def capture_photo(save_path: Optional[str] = None) -> Optional[str]:
 def send_telegram_photo(photo_path: str, caption: str = "") -> bool:
     """
     Send photo to Telegram chat.
-    Uses python-telegram-bot library.
+    Uses the synchronous HTTP sender so it can be called by both async handlers
+    and the background alert monitor.
     """
-    if not TELEGRAM_AVAILABLE:
-        logger.error("❌ python-telegram-bot not installed")
-        return False
-
-    if BOT_TOKEN in ("YOUR_BOT_TOKEN", "", None):
-        logger.error("❌ Telegram bot token not configured")
-        return False
-
-    if CHAT_ID in ("YOUR_CHAT_ID", "", None):
-        logger.error("❌ Telegram chat ID not configured")
-        return False
-
-    if not os.path.exists(photo_path):
-        logger.error(f"❌ Photo not found: {photo_path}")
-        return False
-
     try:
-        # Create bot instance
-        bot = Bot(token=BOT_TOKEN)
-
-        # Send photo
-        with open(photo_path, 'rb') as photo:
-            bot.send_photo(
-                chat_id=CHAT_ID,
-                photo=photo,
-                caption=caption[:1024]  # Telegram caption limit
-            )
-        logger.info(f"📸 Photo sent: {os.path.basename(photo_path)}")
-        return True
-
+        from .send_telegram_photo import send_telegram_photo as send_photo_http
+        return send_photo_http(photo_path, caption)
     except Exception as e:
         logger.error(f"❌ Failed to send photo: {e}")
         return False
@@ -503,8 +477,8 @@ def monitor_alerts():
                         # Send text alert
                         if BOT_TOKEN not in ("YOUR_BOT_TOKEN", "", None) and CHAT_ID not in ("YOUR_CHAT_ID", "", None):
                             try:
-                                bot = Bot(token=BOT_TOKEN)
-                                bot.send_message(chat_id=CHAT_ID, text=caption, parse_mode='Markdown')
+                                from .send_telegram_photo import send_telegram_message
+                                send_telegram_message(caption)
                             except Exception:
                                 logger.warning("⚠️ Alert text message failed to send")
                         else:

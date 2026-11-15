@@ -21,6 +21,8 @@
 #endif
 #include <atomic>
 #include <mutex>
+#include <cmath>
+#include <string>
 
 // ============================================================
 // SerialPort Class (Internal Helper)
@@ -288,6 +290,28 @@ void MotorController::set_speed(float left, float right) {
     send_command(cmd);
 }
 
+void MotorController::set_gps_motion(float linear, float angular) {
+    constexpr int max_gps_pwm = 55;
+    if (!connected || !serial || !std::isfinite(linear) ||
+        !std::isfinite(angular)) {
+        stop();
+        return;
+    }
+
+    const float left = std::clamp(linear / MAX_SPEED - angular / MAX_TURN_SPEED,
+                                  -1.0f, 1.0f);
+    const float right = std::clamp(linear / MAX_SPEED + angular / MAX_TURN_SPEED,
+                                   -1.0f, 1.0f);
+    const int left_pwm = static_cast<int>(std::lround(left * max_gps_pwm));
+    const int right_pwm = static_cast<int>(std::lround(right * max_gps_pwm));
+    const std::string command = "G," + std::to_string(left_pwm) + "," +
+        std::to_string(right_pwm) + "\n";
+    SerialPort* port = static_cast<SerialPort*>(serial);
+    if (!port->write(command.c_str(), command.size())) {
+        std::cerr << "[MOTOR] Failed to send low-speed GPS command" << std::endl;
+    }
+}
+
 // ============================================================
 // Stop Motors
 // ============================================================
@@ -306,7 +330,10 @@ void MotorController::send_command(char cmd) {
     }
     
     try {
-        static_cast<SerialPort*>(serial)->write(&cmd, 1);
+        const char command[] = {cmd, '\n'};
+        if (!static_cast<SerialPort*>(serial)->write(command, sizeof(command))) {
+            std::cerr << "[MOTOR] Failed to send command " << cmd << std::endl;
+        }
         // std::cout << "[MOTOR] Command: " << cmd << std::endl;
     } catch (const std::exception& e) {
         std::cerr << "[MOTOR] Send error: " << e.what() << std::endl;
@@ -388,6 +415,14 @@ void MotorController::read_thread_func() {
 void MotorController::process_response(const std::string& response) {
     last_message = response;
     
+    if (response.find("GPS_COMMAND_TIMEOUT") != std::string::npos) {
+        avoiding = false;
+        g_robot_state.obstacle_detected = false;
+        g_robot_state.is_avoiding = false;
+        std::cerr << "[MOTOR] GPS command heartbeat timed out; ESP32 stopped"
+                  << std::endl;
+    }
+
     // Check for obstacle detection
     if (response.find(RobotProtocol::RESP_OBSTACLE_DETECTED) != std::string::npos) {
         avoiding = true;

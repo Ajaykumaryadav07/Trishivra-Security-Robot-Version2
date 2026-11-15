@@ -18,13 +18,13 @@ def test_pi_camera_flow(monkeypatch):
 
     class FakePicamera2:
         def __init__(self):
-            pass
+            self.config = None
 
-        def create_preview_configuration(self, main):
-            return {'main': main}
+        def create_preview_configuration(self, main, controls):
+            return {'main': main, 'controls': controls}
 
         def configure(self, cfg):
-            self._cfg = cfg
+            self.config = cfg
 
         def start(self):
             pass
@@ -40,8 +40,9 @@ def test_pi_camera_flow(monkeypatch):
     fake_cv2.COLOR_RGB2BGR = 0
     monkeypatch.setattr(mod, 'cv2', fake_cv2, raising=False)
 
-    cam = mod.CameraHandler(camera_type='pi_camera')
+    cam = mod.CameraHandler(camera_type='pi_camera', fps=10)
     assert cam.camera_type == 'pi_camera'
+    assert cam.pi_camera.config['controls']['FrameDurationLimits'] == (100000, 100000)
     ok, frame = cam.read()
     assert ok is True
     assert frame.shape[0] == 8

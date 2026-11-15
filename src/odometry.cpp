@@ -59,7 +59,7 @@ private:
     // Internal helper functions
     float ticks_to_distance(int ticks);
     void calculate_pose(float left_dist, float right_dist, float gyro_z, float dt);
-    void fuse_odometry(float enc_theta, float gyro_theta, float dt);
+    float fuse_odometry(float enc_theta, float gyro_theta, float dt);
     float normalize_angle(float angle);
 };
 
@@ -158,7 +158,7 @@ void Odometry::calculate_pose(float left_dist, float right_dist, float gyro_z, f
 // Sensor Fusion (Encoder + Gyro)
 // ============================================================
 
-void Odometry::fuse_odometry(float enc_theta, float gyro_theta, float dt) {
+float Odometry::fuse_odometry(float enc_theta, float gyro_theta, float dt) {
     // Simple complementary filter
     // alpha = 0.98 (gyro) + 0.02 (encoder)
     // Gyro is more reliable for short-term orientation

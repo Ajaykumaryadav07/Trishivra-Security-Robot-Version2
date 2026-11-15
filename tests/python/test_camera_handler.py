@@ -17,4 +17,12 @@ def test_camerahandler_api_surface():
     mod = __import__('python.camera_handler', fromlist=['*'])
     assert hasattr(mod, 'CameraHandler')
     assert callable(mod.CameraHandler)
-    assert hasattr(mod, 'list_cameras')
+
+
+def test_pi_camera_requires_opencv_for_frame_processing(monkeypatch):
+    mod = __import__('python.camera_handler', fromlist=['*'])
+    monkeypatch.setattr(mod, 'CV2_AVAILABLE', False)
+    monkeypatch.setattr(mod, 'PI_CAMERA_AVAILABLE', True)
+
+    with pytest.raises(RuntimeError, match="OpenCV"):
+        mod.CameraHandler(camera_type='pi_camera')

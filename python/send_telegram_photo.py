@@ -10,6 +10,7 @@ Used by:
 
 import os
 import json
+import sys
 import time
 import logging
 try:
@@ -399,15 +400,18 @@ if __name__ == "__main__":
     print("=" * 40)
 
     print("\n📤 Sending test message...")
-    if test_send_message():
+    message_sent = test_send_message()
+    if message_sent:
         print("✅ Message sent successfully!")
     else:
         print("❌ Failed to send message")
 
     print("\n📸 Sending test photo...")
-    if test_send_photo():
+    photo_sent = test_send_photo()
+    if photo_sent:
         print("✅ Photo sent successfully!")
     else:
         print("❌ Failed to send photo")
 
     print("\n✅ Test complete")
+    sys.exit(0 if message_sent and photo_sent else 1)

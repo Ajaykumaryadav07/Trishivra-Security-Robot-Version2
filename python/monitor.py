@@ -2,7 +2,7 @@
 Security Monitor for Robot V2
 
 Main monitoring loop with:
-- Camera capture (6 FPS)
+- Camera capture (10 FPS)
 - YOLO detection (Person, Weapon, Fire)
 - Alert rules (time/location based)
 - Telegram alerts
@@ -15,6 +15,7 @@ import cv2
 import time
 import json
 import logging
+import tempfile
 import threading
 import numpy as np
 from pathlib import Path
@@ -61,13 +62,17 @@ logger = logging.getLogger(__name__)
 # Camera settings
 CAMERA_WIDTH = int(os.getenv("CAMERA_WIDTH", "640"))
 CAMERA_HEIGHT = int(os.getenv("CAMERA_HEIGHT", "480"))
-CAMERA_FPS = int(os.getenv("CAMERA_FPS", "6"))
+CAMERA_FPS = int(os.getenv("CAMERA_FPS", "10"))
 
 # YOLO settings
-YOLO_MODEL_XML = os.getenv("YOLO_MODEL_XML", "models/yolov8n.xml")
-YOLO_MODEL_BIN = os.getenv("YOLO_MODEL_BIN", "models/yolov8n.bin")
+YOLO_MODEL_XML = os.getenv(
+    "YOLO_MODEL_XML", str(PROJECT_ROOT / "models" / "best_openvino_model" / "best.xml")
+)
+YOLO_MODEL_BIN = os.getenv(
+    "YOLO_MODEL_BIN", str(PROJECT_ROOT / "models" / "best_openvino_model" / "best.bin")
+)
 YOLO_CONFIDENCE = float(os.getenv("YOLO_CONFIDENCE", "0.5"))
-YOLO_IMG_SIZE = int(os.getenv("YOLO_IMG_SIZE", "320"))
+YOLO_IMG_SIZE = int(os.getenv("YOLO_IMG_SIZE", "640"))
 
 # Alert settings
 CONSECUTIVE_FRAMES_REQUIRED = int(os.getenv("CONSECUTIVE_FRAMES_REQUIRED", "3"))
@@ -219,14 +224,47 @@ class SecurityMonitor:
                 fps=CAMERA_FPS
             )
             logger.info(f"📷 Camera ready: {self.camera.get_camera_info()}")
+            self._send_camera_startup_frame()
         except Exception as e:
             logger.error(f"❌ Camera init failed: {e}")
             raise
+
+    def _send_camera_startup_frame(self):
+        """Send one frame from the active camera when the monitor starts."""
+        success, frame = self.camera.read()
+        if not success or frame is None:
+            logger.error("❌ Could not capture camera startup frame")
+            return
+
+        photo_path = None
+        try:
+            with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as photo:
+                photo_path = photo.name
+            if not cv2.imwrite(photo_path, frame):
+                logger.error("❌ Could not save camera startup frame")
+                return
+
+            sent = send_telegram_photo(
+                photo_path,
+                caption="📸 Security robot camera started"
+            )
+            if sent:
+                logger.info("📨 Camera startup frame sent to Telegram")
+            else:
+                logger.error("❌ Failed to send camera startup frame to Telegram")
+        except Exception as e:
+            logger.error(f"❌ Camera startup photo error: {e}")
+        finally:
+            if photo_path and os.path.exists(photo_path):
+                try:
+                    os.remove(photo_path)
+                except OSError as e:
+                    logger.warning(f"⚠️ Could not remove temporary startup photo: {e}")
     
     def _init_detector(self):
         """Initialize YOLO detector."""
         if not YOLO_AVAILABLE:
-            logger.warning("⚠️ YOLO not available - running in mock mode")
+            logger.warning("⚠️ YOLO not available - object detection is disabled")
             return
         
         try:
@@ -248,32 +286,13 @@ class SecurityMonitor:
         Returns list of detections.
         """
         if self.detector is None:
-            # Mock detection for testing
-            return self._mock_detect(frame)
+            return []
         
         try:
             return self.detector.detect(frame)
         except Exception as e:
             logger.error(f"❌ Detection error: {e}")
             return []
-    
-    def _mock_detect(self, frame: np.ndarray) -> List[Dict]:
-        """
-        Mock detection for testing without YOLO.
-        """
-        # Simulate detection every 30 frames
-        if hasattr(self, '_mock_counter'):
-            self._mock_counter += 1
-        else:
-            self._mock_counter = 0
-        
-        if self._mock_counter % 30 == 0:
-            return [{
-                'class': 'person',
-                'confidence': 0.75,
-                'bbox': [100, 100, 200, 300]
-            }]
-        return []
     
     def draw_detections(self, frame: np.ndarray, detections: List[Dict]) -> np.ndarray:
         """Draw detection boxes on frame."""

@@ -1,0 +1,12 @@
+# Local secrets and environment overrides
+.env
+.env.*
+!.env.example
+config/robot_settings.local.yaml
+
+# Python-generated files
+__pycache__/
+*.py[cod]
+
+# Local build output
+build-linux/
